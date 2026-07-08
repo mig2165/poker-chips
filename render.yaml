@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: poker-chips-tracker
+    runtime: static
+    buildCommand: npm run build
+    publishPath: dist
+    routes:
+      - src: /*
+        dest: /index.html
+        status: 200
