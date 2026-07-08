@@ -2,9 +2,9 @@ services:
   - type: web
     name: poker-chips-tracker
     runtime: static
-    buildCommand: npm run build
-    publishPath: dist
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
     routes:
-      - src: /*
-        dest: /index.html
-        status: 200
+      - type: rewrite
+        source: /*
+        destination: /index.html
