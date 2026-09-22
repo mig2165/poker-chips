@@ -81,6 +81,10 @@ export default function Layout() {
           ))}
         </div>
       </nav>
+      <footer className="fixed bottom-16 left-0 right-0 z-40 flex justify-center gap-4 text-[10px] text-slate-500 pointer-events-none">
+        <NavLink className="pointer-events-auto hover:text-slate-300" to="/terms">Terms</NavLink>
+        <NavLink className="pointer-events-auto hover:text-slate-300" to="/privacy">Privacy</NavLink>
+      </footer>
     </div>
   )
 }

@@ -2,6 +2,12 @@ services:
   - type: web
     name: poker-chips-tracker
     runtime: static
+    autoDeploy: false
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     routes:

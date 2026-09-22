@@ -13,15 +13,12 @@ export default function ActionLogDrawer({ isOpen, onClose }: ActionLogDrawerProp
 
   // Handle animation timing
   useEffect(() => {
-    if (isOpen) {
-      setIsRendered(true)
-    } else {
-      const timer = setTimeout(() => setIsRendered(false), 300)
-      return () => clearTimeout(timer)
-    }
+    if (isOpen) return
+    const timer = setTimeout(() => setIsRendered(false), 300)
+    return () => clearTimeout(timer)
   }, [isOpen])
 
-  if (!isRendered) return null
+  if (!isOpen && !isRendered) return null
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">

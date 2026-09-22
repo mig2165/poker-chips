@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ActionLogDrawer from '../components/ActionLogDrawer'
 import { useGameStore } from '../store/useGameStore'
+import { decideBotAction } from '../engine'
 import type { Player, LogActionType } from '../engine'
 
 interface SeatPosition {
@@ -26,13 +27,76 @@ function getSeatPositions(count: number, width: number, height: number): SeatPos
 
 export default function TablePage() {
   const navigate = useNavigate()
-  const { game, startNextHand, dispatchAction, awardPotToPlayer, rebuyPlayer } = useGameStore()
+  const { game, bluffAlert, clearBluffAlert, startNextHand, dispatchAction, awardPotToPlayer, rebuyPlayer, connectOnlineRoom, disconnectOnlineRoom } = useGameStore()
   
   const [isLogOpen, setIsLogOpen] = useState(false)
   const [isBetModalOpen, setIsBetModalOpen] = useState(false)
   const [betAmount, setBetAmount] = useState('')
   const [betType, setBetType] = useState<'bet' | 'raise'>('bet')
-  const [isAwardingPot, setIsAwardingPot] = useState(false)
+  const [isSelectingWinner, setIsSelectingWinner] = useState(false)
+
+  const botHand = game?.hand
+  const botPlayer = botHand && game ? game.players[botHand.currentPlayerIndex] : null
+  const localPlayerId = game?.players.find(player => player.isLocal)?.id
+
+  useEffect(() => {
+    if (!botHand || botHand.isComplete || !botPlayer?.isBot) return
+    const timer = window.setTimeout(() => {
+      const decision = decideBotAction(game!, botPlayer.id)
+      dispatchAction(botPlayer.id, decision.actionType, decision.amount)
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [botHand, botHand?.currentBettingRound, botHand?.currentPlayerIndex, botHand?.handNumber, botHand?.isComplete, botPlayer?.id, botPlayer?.isBot, botPlayer?.stack, dispatchAction, game])
+
+  const players = game?.players ?? []
+  const hand = game?.hand ?? null
+  const tableW = 460
+  const tableH = 520
+  const seats = useMemo(
+    () => getSeatPositions(Math.max(2, players.length), tableW, tableH),
+    [players.length],
+  )
+
+  useEffect(() => {
+    if (game?.config.mode !== 'online' || !game.config.roomCode) return
+    void connectOnlineRoom(game.config.roomCode, localPlayerId).catch(error => {
+      console.error('Could not connect to online room', error)
+    })
+    return () => {
+      void disconnectOnlineRoom()
+    }
+  }, [connectOnlineRoom, disconnectOnlineRoom, game?.config.mode, game?.config.roomCode, localPlayerId])
+
+  useEffect(() => {
+    if (!bluffAlert) return
+    let audioContext: AudioContext | null = null
+    try {
+      audioContext = new AudioContext()
+      const oscillator = audioContext.createOscillator()
+      const gain = audioContext.createGain()
+      oscillator.type = 'square'
+      oscillator.frequency.setValueAtTime(220, audioContext.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(620, audioContext.currentTime + 0.12)
+      oscillator.frequency.exponentialRampToValueAtTime(180, audioContext.currentTime + 0.38)
+      gain.gain.setValueAtTime(0.0001, audioContext.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.12, audioContext.currentTime + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.42)
+      oscillator.connect(gain)
+      gain.connect(audioContext.destination)
+      oscillator.start()
+      oscillator.stop(audioContext.currentTime + 0.45)
+    } catch {
+      audioContext = null
+    }
+    const timer = window.setTimeout(() => {
+      clearBluffAlert()
+      if (audioContext) void audioContext.close()
+    }, 2800)
+    return () => {
+      window.clearTimeout(timer)
+      if (audioContext) void audioContext.close()
+    }
+  }, [bluffAlert, clearBluffAlert])
 
   // Redirect to lobby if no game
   if (!game) {
@@ -48,25 +112,15 @@ export default function TablePage() {
     )
   }
 
-  const players = game.players
-  const hand = game.hand
-  
-  const tableW = 340
-  const tableH = 400
-
-  const seats = useMemo(
-    () => getSeatPositions(Math.max(2, players.length), tableW, tableH),
-    [players.length],
-  )
-
   const activePlayer = hand ? players[hand.currentPlayerIndex] : null
   const highestBet = hand ? Math.max(...players.map(p => p.currentBet)) : 0
   
   const canCheck = activePlayer ? activePlayer.currentBet === highestBet : false
   const callAmount = activePlayer ? highestBet - activePlayer.currentBet : 0
+  const canControlTurn = Boolean(activePlayer && !activePlayer.isBot && (game.config.mode !== 'online' || activePlayer.isLocal))
 
   function handleAction(type: LogActionType) {
-    if (!activePlayer) return
+    if (!activePlayer || !canControlTurn) return
     dispatchAction(activePlayer.id, type)
   }
 
@@ -77,7 +131,7 @@ export default function TablePage() {
   }
 
   function submitBet() {
-    if (!activePlayer) return
+    if (!activePlayer || !canControlTurn) return
     const amt = parseInt(betAmount, 10)
     if (!isNaN(amt) && amt > 0) {
       dispatchAction(activePlayer.id, betType, amt)
@@ -87,21 +141,38 @@ export default function TablePage() {
 
   function handlePlayerTap(player: Player) {
     if (!game) return
-    if (isAwardingPot) {
+    if (game.config.mode === 'chipless' && isSelectingWinner) {
       awardPotToPlayer([player.id])
-      setIsAwardingPot(false)
-    } else {
-      // If tapping a player not during award, maybe they want to rebuy?
-      // Simple prompt for MVP
-      const rebuy = window.confirm(`Add $${game.config.buyIn} rebuy for ${player.name}?`)
-      if (rebuy) {
-        rebuyPlayer(player.id, game.config.buyIn)
-      }
+      setIsSelectingWinner(false)
+      return
+    }
+    if (player.isBot) return
+    const rebuy = window.confirm(`Add $${game.config.buyIn} rebuy for ${player.name}?`)
+    if (rebuy) {
+      rebuyPlayer(player.id, game.config.buyIn)
+    }
+  }
+
+  async function copyRoomInvite() {
+    const currentGame = useGameStore.getState().game
+    if (!currentGame?.config.roomCode) return
+    const invite = `${window.location.origin}/?room=${currentGame.config.roomCode}`
+    try {
+      await navigator.clipboard.writeText(invite)
+      window.alert(`Invite copied: ${invite}`)
+    } catch {
+      window.prompt('Copy this invite link:', invite)
     }
   }
 
   return (
-    <div className="min-h-dvh flex flex-col">
+    <div className="min-h-dvh flex flex-col table-shell">
+      {bluffAlert && (
+        <div className="bluff-alert" role="status" aria-live="polite">
+          <div className="bluff-alert-title">{bluffAlert}</div>
+          <div className="bluff-alert-subtitle">You folded a winning hand.</div>
+        </div>
+      )}
       {/* Header Bar */}
       <header
         className="glass sticky top-0 z-40 flex items-center justify-between px-5 py-3 border-b"
@@ -114,8 +185,13 @@ export default function TablePage() {
           <p className="text-[10px] font-semibold uppercase tracking-widest"
             style={{ color: 'var(--text-muted)' }}
           >
-            Blinds 1 / 2
+            {game.config.useBlinds ? `Blinds ${game.config.smallBlind} / ${game.config.bigBlind}` : `Minimum bet ${game.config.minimumBet}`}
           </p>
+          {game.config.mode === 'online' && (
+            <button onClick={copyRoomInvite} className="text-[10px] font-bold tracking-widest text-emerald-300 hover:text-white">
+              ROOM {game.config.roomCode} · COPY INVITE
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button 
@@ -138,12 +214,31 @@ export default function TablePage() {
         </div>
       </header>
 
+      <div className="table-status mx-auto mt-3 w-[min(92%,34rem)] border px-4 py-3" role="status" aria-live="polite">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--text-muted)' }}>
+              {hand?.currentBettingRound ? `${hand.currentBettingRound} street` : 'Ready table'}
+            </p>
+            <p className="mt-1 text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+              {!hand ? 'Start a hand when everyone is seated.' : hand.isComplete ? 'Showdown complete' : canControlTurn ? 'Your turn to act' : activePlayer?.isBot ? `${activePlayer.name} is deciding` : `Waiting for ${activePlayer?.name ?? 'the active player'}`}
+            </p>
+          </div>
+          {hand && !hand.isComplete && (
+            <div className="text-right">
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>To call</p>
+              <p className="font-mono text-lg font-extrabold" style={{ color: 'var(--color-gold)' }}>${callAmount}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Table Area */}
       <section className="flex-1 flex flex-col items-center justify-center px-4 py-6">
-        <div className="relative" style={{ width: tableW, height: tableH }}>
+        <div className="relative table-stage" style={{ width: tableW, height: tableH }}>
           {/* Felt Oval */}
           <div
-            className="absolute inset-6 rounded-[50%] border-2"
+            className="absolute inset-2 rounded-[50%] border-2 table-felt"
             style={{
               background: 'radial-gradient(ellipse at center, var(--color-felt-light) 0%, var(--color-felt) 60%, var(--color-felt-dark) 100%)',
               borderColor: 'var(--color-gold-dim)',
@@ -168,7 +263,7 @@ export default function TablePage() {
                     return (
                       <div 
                         key={i}
-                        className="w-8 h-11 relative"
+                        className={`w-10 h-14 relative community-card ${isRevealed ? 'is-revealed' : ''}`}
                         style={{
                           perspective: '1000px',
                           transformStyle: 'preserve-3d',
@@ -200,10 +295,10 @@ export default function TablePage() {
                             color: textColor,
                           }}
                         >
-                          {card && (
+                          {card && game.config.mode !== 'chipless' && (
                             <div className="flex flex-col items-center justify-center leading-tight select-none">
-                              <span className="text-[11px] font-black font-mono leading-none">{rankDisplay}</span>
-                              <span className="text-sm leading-none mt-0.5">{suitSymbol}</span>
+                              <span className="text-[14px] font-black font-mono leading-none">{rankDisplay}</span>
+                              <span className="text-base leading-none mt-0.5">{suitSymbol}</span>
                             </div>
                           )}
                         </div>
@@ -211,7 +306,7 @@ export default function TablePage() {
                     )
                   })}
                 </div>
-                <div className="text-center bg-black/60 px-3 py-1.5 rounded-full backdrop-blur-sm border border-white/10 shadow-lg">
+                <div className="text-center bg-black/60 px-3 py-1.5 rounded-lg backdrop-blur-sm border border-white/10 shadow-lg">
                   <div className="text-lg font-extrabold font-mono" style={{ color: 'var(--color-gold)' }}>
                     ${hand.totalPot}
                   </div>
@@ -238,7 +333,7 @@ export default function TablePage() {
               <div
                 key={player.id}
                 onClick={() => handlePlayerTap(player)}
-                className={`absolute flex flex-col items-center transition-all duration-300 ${isAwardingPot ? 'cursor-pointer animate-pulse hover:scale-110' : ''} ${!player.isActive && hand ? 'opacity-40 grayscale' : ''}`}
+                className={`absolute flex flex-col items-center transition-all duration-300 cursor-pointer ${!player.isActive && hand ? 'opacity-40 grayscale' : ''}`}
                 style={{
                   left: pos.x,
                   top: pos.y,
@@ -259,14 +354,14 @@ export default function TablePage() {
                   
                   {/* Dealer Button */}
                   {isDealer && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-md"
+                    <span className="absolute -top-1 -right-1 w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold shadow-md"
                       style={{ background: 'var(--color-gold)', color: 'var(--surface-primary)' }}
                     >D</span>
                   )}
                   
                   {/* Current Bet floating chip */}
                   {hand && player.currentBet > 0 && (
-                    <div className="absolute -top-6 px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-white text-black shadow-lg">
+                    <div className="absolute -top-6 px-2 py-0.5 rounded-md text-xs font-mono font-bold bg-white text-black shadow-lg">
                       ${player.currentBet}
                     </div>
                   )}
@@ -288,6 +383,30 @@ export default function TablePage() {
                   <div className="text-[11px] font-mono font-medium" style={{ color: 'var(--text-accent)' }}>
                     ${player.stack}
                   </div>
+                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && (player.isLocal || hand.isComplete) && (
+                    <div className="flex gap-1 justify-center mt-1">
+                      {player.holeCards.map(card => {
+                        const symbol = { S: '♠', H: '♥', D: '♦', C: '♣' }[card.suit]
+                        const red = card.suit === 'H' || card.suit === 'D'
+                        return (
+                          <span key={`${card.rank}${card.suit}`} className={`player-card rounded bg-white px-1.5 py-0.5 text-xs font-black shadow ${hand.isComplete ? 'showdown-reveal' : ''}`} style={{ color: red ? '#e11d48' : '#0f172a' }}>
+                            {card.rank === 'T' ? '10' : card.rank}{symbol}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {hand && game.config.mode === 'chipless' && (
+                    <div className="flex gap-1 justify-center mt-1" aria-label="Cards are tracked with physical cards">
+                      <span className="h-5 w-4 rounded-sm border border-white/25 bg-slate-700/70" />
+                      <span className="h-5 w-4 rounded-sm border border-white/25 bg-slate-700/70" />
+                    </div>
+                  )}
+                  {game.config.mode !== 'chipless' && hand?.showdownWinners.includes(player.id) && (
+                    <div className="mt-1 rounded-md bg-green-500 px-2 py-0.5 text-[9px] font-black text-black">
+                      WINNER
+                    </div>
+                  )}
                 </div>
               </div>
             )
@@ -297,27 +416,44 @@ export default function TablePage() {
 
       {/* Action Bar */}
       <div className="glass border-t p-4 pb-safe" style={{ borderColor: 'var(--border-subtle)' }}>
-        {isAwardingPot ? (
-          <div className="flex flex-col gap-3 max-w-lg mx-auto text-center">
-            <p className="text-lg font-bold text-green-400">Tap the winning player!</p>
-            <button onClick={() => setIsAwardingPot(false)} className="py-3 rounded-xl border border-red-500/30 text-red-400 font-bold bg-red-500/10">
-              Cancel Award
-            </button>
-          </div>
-        ) : !hand || hand.isComplete ? (
+        {!hand || hand.isComplete ? (
           <div className="flex flex-col gap-3 max-w-lg mx-auto">
-            {hand && hand.isComplete && (
-               <button onClick={() => setIsAwardingPot(true)} className="w-full py-4 rounded-xl font-extrabold text-lg bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.3)]">
-                 AWARD POT
-               </button>
+            {hand && hand.isComplete && game.config.mode === 'chipless' && !isSelectingWinner && (
+              <button onClick={() => setIsSelectingWinner(true)} className="w-full rounded-lg bg-green-600 py-4 text-lg font-extrabold shadow-[0_0_20px_rgba(34,197,94,0.3)]">
+                SELECT WINNER
+              </button>
             )}
-            <button onClick={startNextHand} className="w-full py-4 rounded-xl font-bold border border-gold/50 text-gold" style={{ color: 'var(--color-gold)', borderColor: 'var(--color-gold-dim)' }}>
-              {hand ? 'Start Next Hand' : 'Start First Hand'}
+            {isSelectingWinner && (
+              <p className="text-center text-sm font-bold text-green-400">Tap the player who won the physical hand.</p>
+            )}
+            {hand && hand.isComplete && game.config.mode !== 'chipless' && game.config.mode !== 'online' && (
+              <>
+                <p className="text-center text-sm font-bold text-green-400">
+                  Winner{hand.showdownWinners.length === 1 ? '' : 's'}: {hand.showdownWinners.map(id => players.find(player => player.id === id)?.name).filter(Boolean).join(', ') || 'No eligible player'}
+                </p>
+                <button onClick={() => awardPotToPlayer(hand.showdownWinners)} className="w-full py-4 rounded-xl font-extrabold text-lg bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.3)]">
+                  AWARD CALCULATED POT{hand.pots.length > 1 ? 'S' : ''}
+                </button>
+              </>
+            )}
+            <button
+              onClick={startNextHand}
+              disabled={game.config.mode === 'online' && Boolean(hand?.isComplete)}
+              className="w-full py-4 rounded-xl font-bold border border-gold/50 text-gold disabled:cursor-wait disabled:opacity-60"
+              style={{ color: 'var(--color-gold)', borderColor: 'var(--color-gold-dim)' }}
+            >
+              {game.config.mode === 'online' && hand?.isComplete ? 'Revealing Showdown...' : hand ? 'Start Next Hand' : 'Start First Hand'}
             </button>
             <p className="text-center text-xs text-muted/50">Tip: Tap a player to process a Rebuy.</p>
           </div>
         ) : (
-          <div className="flex items-center gap-2 max-w-lg mx-auto">
+          <div className="flex flex-col gap-2 max-w-lg mx-auto">
+            {!canControlTurn && (
+              <p className="text-center text-sm text-slate-400">
+                {activePlayer?.isBot ? `${activePlayer.name} is deciding...` : `Waiting for ${activePlayer?.name ?? 'the active player'}...`}
+              </p>
+            )}
+            {canControlTurn && <div className="flex items-center gap-2">
             <button onClick={() => handleAction('fold')} className="flex-1 py-3 rounded-xl text-sm font-bold bg-red-500/10 border border-red-500/30 text-red-500 active:scale-95 transition-transform">
               Fold
             </button>
@@ -337,6 +473,7 @@ export default function TablePage() {
               <span>{canCheck ? 'Bet' : 'Raise'}</span>
               <span className="text-[10px] font-mono font-normal">...</span>
             </button>
+            </div>}
           </div>
         )}
       </div>
@@ -359,10 +496,10 @@ export default function TablePage() {
             />
 
             <div className="grid grid-cols-4 gap-2 mb-6">
-              <button onClick={() => setBetAmount((highestBet + (highestBet || 2)).toString())} className="py-2 rounded-lg bg-slate-800 text-xs font-bold text-slate-300">Min</button>
+              <button onClick={() => setBetAmount((highestBet + (hand?.lastRaiseSize ?? game.config.minimumBet)).toString())} className="py-2 rounded-lg bg-slate-800 text-xs font-bold text-slate-300">Min</button>
               <button onClick={() => setBetAmount(Math.floor((hand?.totalPot ?? 0) / 2 + highestBet).toString())} className="py-2 rounded-lg bg-slate-800 text-xs font-bold text-slate-300">½ Pot</button>
               <button onClick={() => setBetAmount(((hand?.totalPot ?? 0) + highestBet).toString())} className="py-2 rounded-lg bg-slate-800 text-xs font-bold text-slate-300">Pot</button>
-              <button onClick={() => setBetAmount(activePlayer.stack.toString())} className="py-2 rounded-lg bg-slate-800 text-xs font-bold text-red-400">All-In</button>
+              <button onClick={() => setBetAmount((activePlayer.currentBet + activePlayer.stack).toString())} className="py-2 rounded-lg bg-slate-800 text-xs font-bold text-red-400">All-In</button>
             </div>
 
             <div className="flex gap-3">

@@ -2,13 +2,21 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/useGameStore'
 import type { Player } from '../engine'
+import { createRoom } from '../lib/onlineRoom'
+import { hasSupabaseConfig } from '../lib/supabase'
 
 export default function SettingsPage() {
   const navigate = useNavigate()
-  const { defaultConfig, updateConfig, createGame } = useGameStore()
+  const { defaultConfig, updateConfig, createGame, joinOnlineRoom } = useGameStore()
 
   const [buyIn, setBuyIn] = useState(defaultConfig.buyIn.toString())
   const [playerNames, setPlayerNames] = useState<string[]>(['You', 'Player 2'])
+  const [mode, setMode] = useState<'local' | 'bots' | 'online' | 'chipless'>('local')
+  const [roomCode, setRoomCode] = useState('')
+  const [minimumBet, setMinimumBet] = useState(defaultConfig.minimumBet.toString())
+  const [useBlinds, setUseBlinds] = useState(defaultConfig.useBlinds)
+  const [smallBlind, setSmallBlind] = useState(defaultConfig.smallBlind.toString())
+  const [bigBlind, setBigBlind] = useState(defaultConfig.bigBlind.toString())
 
   function handleAddPlayer() {
     if (playerNames.length < 7) {
@@ -28,15 +36,20 @@ export default function SettingsPage() {
     setPlayerNames(newNames)
   }
 
-  function handleStartGame() {
+  async function handleStartGame() {
     const finalBuyIn = parseInt(buyIn, 10) || 20
-    updateConfig({ buyIn: finalBuyIn })
+    const finalMinimumBet = Math.max(1, parseInt(minimumBet, 10) || 2)
+    const finalSmallBlind = Math.max(0, parseInt(smallBlind, 10) || 1)
+    const finalBigBlind = Math.max(finalSmallBlind, parseInt(bigBlind, 10) || 2)
+    updateConfig({ buyIn: finalBuyIn, minimumBet: finalMinimumBet, useBlinds, smallBlind: finalSmallBlind, bigBlind: finalBigBlind })
 
     // Create the game in the store
-    createGame({ buyIn: finalBuyIn, maxPlayers: 7 })
+    const finalRoomCode = mode === 'online' ? (roomCode.trim().toUpperCase() || Math.random().toString(36).slice(2, 8).toUpperCase()) : undefined
+    createGame({ buyIn: finalBuyIn, maxPlayers: 7, mode, roomCode: finalRoomCode, minimumBet: finalMinimumBet, useBlinds, smallBlind: finalSmallBlind, bigBlind: finalBigBlind })
 
     // Initialize players
-    const players: Player[] = playerNames.map((name, index) => ({
+    const names = mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : playerNames
+    const players: Player[] = names.map((name, index) => ({
       id: crypto.randomUUID(),
       name: name.trim() || `Player ${index + 1}`,
       seat: index,
@@ -46,7 +59,11 @@ export default function SettingsPage() {
       isActive: true,
       isSittingOut: false,
       currentBet: 0,
+      handContribution: 0,
+      holeCards: [],
       hasActed: false,
+      isBot: mode === 'bots' && index > 0,
+      isLocal: index === 0,
     }))
 
     // Directly mutate the store's game object with players
@@ -59,6 +76,27 @@ export default function SettingsPage() {
         }
       }
     })
+
+    if (mode === 'online') {
+      if (!hasSupabaseConfig()) {
+        window.alert('Add the Supabase values to .env.local before creating an online room.')
+        return
+      }
+      try {
+        if (roomCode.trim()) {
+          await joinOnlineRoom(roomCode.trim().toUpperCase(), players[0].name, finalBuyIn)
+          navigate('/table')
+          return
+        }
+        const createdGame = useGameStore.getState().game
+        if (createdGame && finalRoomCode) {
+          await createRoom(finalRoomCode, players[0].name, createdGame)
+        }
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Could not create online room')
+        return
+      }
+    }
 
     navigate('/table')
   }
@@ -128,6 +166,55 @@ export default function SettingsPage() {
         </section>
 
         {/* Players List */}
+        <section className="rounded-2xl p-5 border shrink-0" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}>
+          <h2 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Game Mode</h2>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {([
+              ['local', 'Home table', 'Everyone visible'],
+              ['bots', 'Solo vs bots', 'You + 2 bots'],
+              ['online', 'Online room', 'Share a room code'],
+              ['chipless', 'Chipless', 'Track real chips'],
+            ] as const).map(([value, title, detail]) => (
+              <button key={value} onClick={() => setMode(value)} className="rounded-xl border p-3 text-left transition-all" style={{ borderColor: mode === value ? 'var(--color-gold)' : 'var(--border-subtle)', background: mode === value ? 'rgba(245,197,66,.12)' : 'var(--surface-secondary)' }}>
+                <div className="text-xs font-bold">{title}</div>
+                <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>{detail}</div>
+              </button>
+            ))}
+          </div>
+          {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>Room code will be shown at the table. Connect a realtime room service to let remote players join this room.</p>}
+          {mode === 'online' && (
+            <input
+              value={roomCode}
+              onChange={event => setRoomCode(event.target.value)}
+              placeholder="Leave blank to create a new room"
+              className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
+              style={{ background: 'var(--surface-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+            />
+          )}
+        </section>
+
+        <section className="rounded-2xl border p-5" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}>
+          <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Betting Rules</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-slate-400">Minimum bet
+              <input type="number" min={1} value={minimumBet} onChange={event => setMinimumBet(event.target.value)} className="mt-1 w-full rounded-xl border bg-slate-800 px-3 py-2 text-sm text-white" />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-300">
+              <input type="checkbox" checked={useBlinds} onChange={event => setUseBlinds(event.target.checked)} />
+              Use small and big blinds
+            </label>
+            {useBlinds && <>
+              <label className="text-xs text-slate-400">Small blind
+                <input type="number" min={0} value={smallBlind} onChange={event => setSmallBlind(event.target.value)} className="mt-1 w-full rounded-xl border bg-slate-800 px-3 py-2 text-sm text-white" />
+              </label>
+              <label className="text-xs text-slate-400">Big blind
+                <input type="number" min={1} value={bigBlind} onChange={event => setBigBlind(event.target.value)} className="mt-1 w-full rounded-xl border bg-slate-800 px-3 py-2 text-sm text-white" />
+              </label>
+            </>}
+          </div>
+        </section>
+
+        {/* Players List */}
         <section
           className="rounded-2xl p-5 border flex-1 flex flex-col"
           style={{
@@ -140,9 +227,9 @@ export default function SettingsPage() {
             <h2 className="text-xs font-semibold uppercase tracking-widest"
               style={{ color: 'var(--text-muted)' }}
             >
-              Players ({playerNames.length}/7)
+              Players ({mode === 'bots' ? 3 : playerNames.length}/7)
             </h2>
-            {playerNames.length < 7 && (
+            {mode !== 'bots' && playerNames.length < 7 && (
               <button
                 onClick={handleAddPlayer}
                 className="text-xs font-bold transition-colors"
@@ -154,7 +241,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
-            {playerNames.map((name, i) => (
+            {(mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : playerNames).map((name, i) => (
               <div key={i} className="flex items-center gap-2">
                 <div className="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold"
                   style={{ background: 'var(--surface-tertiary)', color: 'var(--text-muted)' }}
@@ -164,7 +251,8 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => handleNameChange(i, e.target.value)}
+                  onChange={(e) => mode !== 'bots' && handleNameChange(i, e.target.value)}
+                  readOnly={mode === 'bots'}
                   placeholder={`Player ${i + 1}`}
                   className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border outline-none transition-all duration-200 focus:ring-2"
                   style={{
@@ -175,7 +263,7 @@ export default function SettingsPage() {
                     '--tw-ring-color': 'var(--border-active)',
                   }}
                 />
-                {playerNames.length > 2 && (
+                {mode !== 'bots' && playerNames.length > 2 && (
                   <button
                     onClick={() => handleRemovePlayer(i)}
                     className="p-2 shrink-0 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"

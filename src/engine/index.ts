@@ -3,7 +3,7 @@
  *
  * Barrel export for the game engine.
  * All pure game logic will live under src/engine/.
- * React components import from here — never the other way around.
+ * React components import from here, never the other way around.
  */
 
 export type {
@@ -22,5 +22,6 @@ export type {
 } from './types'
 
 // Logic exports
-export { startHand, handleAction, awardPot, addRebuy } from './logic'
+export { startHand, handleAction, awardPot, addRebuy, decideBotAction } from './logic'
+export type { BotDecision } from './logic'
 // export { validateAction, getValidActions }     from './rules'

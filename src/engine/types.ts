@@ -2,7 +2,7 @@
  * src/engine/types.ts
  *
  * Core type definitions for the poker game engine.
- * This module is pure TypeScript — no React, no side effects.
+ * This module is pure TypeScript with no React or side effects.
  */
 
 // ─── Player ───────────────────────────────────────────────
@@ -16,7 +16,11 @@ export interface Player {
   isActive: boolean     // still in the hand (hasn't folded)
   isSittingOut: boolean // sitting out entirely
   currentBet: number    // amount committed in the current betting round
+  handContribution: number // total amount committed across the current hand
+  holeCards: Card[]     // two private cards dealt to this player
   hasActed: boolean     // whether the player has acted this round
+  isBot: boolean
+  isLocal: boolean
 }
 
 // ─── Betting ──────────────────────────────────────────────
@@ -43,12 +47,20 @@ export interface Card {
 export interface Pot {
   amount: number
   eligiblePlayerIds: string[]
+  winnerIds?: string[]
+  winningHand?: string
 }
 
 // ─── Game Configuration ───────────────────────────────────
 export interface GameConfig {
   buyIn: number           // Base buy-in amount, also dictates starting stack
   maxPlayers: number      // Maximum 7
+  mode?: 'local' | 'bots' | 'online' | 'chipless'
+  roomCode?: string
+  minimumBet: number
+  useBlinds: boolean
+  smallBlind: number
+  bigBlind: number
 }
 
 // ─── Logging ──────────────────────────────────────────────
@@ -80,6 +92,9 @@ export interface HandState {
   isComplete: boolean
   deck: Card[]                 // remaining cards in the deck
   boardCards: Card[]           // revealed cards on the board
+  showdownWinners: string[]
+  lastRaiseSize: number
+  revealAllCards?: boolean
 }
 
 // ─── Full Game State ──────────────────────────────────────
