@@ -17,7 +17,7 @@ let roomChannel: RealtimeChannel | null = null
 const scheduledShowdowns = new Set<number>()
 
 function getBluffMessage(game: GameState): string | null {
-  if (game.config.mode !== 'online' || game.config.mode === 'chipless' || !game.hand?.isComplete || !game.hand.boardCards.length) return null
+  if (game.config.mode !== 'online' || !game.hand?.isComplete || !game.hand.boardCards.length) return null
   const localPlayer = game.players.find(player => player.isLocal)
   if (!localPlayer || localPlayer.isActive || localPlayer.holeCards.length !== 2) return null
   const winners = game.players.filter(player => game.hand?.showdownWinners.includes(player.id))
