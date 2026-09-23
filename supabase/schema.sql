@@ -1,10 +1,15 @@
 create table if not exists public.rooms (
   room_code text primary key,
   host_name text not null,
+  host_id uuid default auth.uid(),
+  is_public boolean not null default false,
   game_state jsonb not null,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table public.rooms add column if not exists host_id uuid;
+alter table public.rooms add column if not exists is_public boolean not null default false;
 
 alter table public.rooms enable row level security;
 
@@ -29,6 +34,71 @@ begin
       and tablename = 'rooms'
   ) then
     alter publication supabase_realtime add table public.rooms;
+  end if;
+end
+$$;
+
+create table if not exists public.room_join_requests (
+  id uuid primary key default gen_random_uuid(),
+  room_code text not null references public.rooms(room_code) on delete cascade,
+  requester_id uuid not null default auth.uid(),
+  requester_name text not null,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'declined')),
+  created_at timestamptz not null default now(),
+  unique(room_code, requester_id)
+);
+
+alter table public.room_join_requests enable row level security;
+drop policy if exists "Anyone can view public room join requests" on public.room_join_requests;
+create policy "Anyone can view public room join requests"
+on public.room_join_requests for select to authenticated using (auth.uid() = requester_id or exists (
+  select 1 from public.rooms where rooms.room_code = room_join_requests.room_code and rooms.host_id = auth.uid()
+));
+drop policy if exists "Users can request public rooms" on public.room_join_requests;
+create policy "Users can request public rooms"
+on public.room_join_requests for insert to authenticated with check (auth.uid() = requester_id);
+drop policy if exists "Hosts can respond to join requests" on public.room_join_requests;
+create policy "Hosts can respond to join requests"
+on public.room_join_requests for update to authenticated using (exists (
+  select 1 from public.rooms where rooms.room_code = room_join_requests.room_code and rooms.host_id = auth.uid()
+)) with check (exists (
+  select 1 from public.rooms where rooms.room_code = room_join_requests.room_code and rooms.host_id = auth.uid()
+));
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'room_join_requests'
+  ) then
+    alter publication supabase_realtime add table public.room_join_requests;
+  end if;
+end
+$$;
+
+create table if not exists public.room_messages (
+  id uuid primary key default gen_random_uuid(),
+  room_code text not null references public.rooms(room_code) on delete cascade,
+  sender_id uuid not null default auth.uid(),
+  sender_name text not null,
+  message text not null check (char_length(message) between 1 and 300),
+  created_at timestamptz not null default now()
+);
+
+alter table public.room_messages enable row level security;
+drop policy if exists "Room members can read chat" on public.room_messages;
+create policy "Room members can read chat"
+on public.room_messages for select to authenticated using (true);
+drop policy if exists "Signed-in users can send chat" on public.room_messages;
+create policy "Signed-in users can send chat"
+on public.room_messages for insert to authenticated with check (auth.uid() = sender_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'room_messages'
+  ) then
+    alter publication supabase_realtime add table public.room_messages;
   end if;
 end
 $$;

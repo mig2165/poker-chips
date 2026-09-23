@@ -57,6 +57,7 @@ export interface GameConfig {
   maxPlayers: number      // Maximum 7
   mode?: 'local' | 'bots' | 'online' | 'chipless'
   roomCode?: string
+  isPublic?: boolean
   minimumBet: number
   useBlinds: boolean
   smallBlind: number

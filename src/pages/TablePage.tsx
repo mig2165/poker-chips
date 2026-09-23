@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ActionLogDrawer from '../components/ActionLogDrawer'
 import { useGameStore } from '../store/useGameStore'
 import { decideBotAction } from '../engine'
 import type { Player, LogActionType } from '../engine'
 import { leavePresence, subscribeToUserPresence, supabase } from '../lib/supabase'
+import { listRoomJoinRequests, respondToRoomJoinRequest, sendRoomChat, subscribeToRoomChat } from '../lib/onlineRoom'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 interface SeatPosition {
@@ -37,10 +38,14 @@ export default function TablePage() {
   const [betType, setBetType] = useState<'bet' | 'raise'>('bet')
   const [isSelectingWinner, setIsSelectingWinner] = useState(false)
   const [showOwnCards, setShowOwnCards] = useState(false)
+  const [chatMessage, setChatMessage] = useState('')
+  const [chat, setChat] = useState<Array<{ senderName: string; message: string }>>([])
+  const [joinRequests, setJoinRequests] = useState<Array<{ id: string; requesterName: string }>>([])
 
   const botHand = game?.hand
   const botPlayer = botHand && game ? game.players[botHand.currentPlayerIndex] : null
   const localPlayerId = game?.players.find(player => player.isLocal)?.id
+  const isLocalHost = game?.players.some(player => player.seat === 0 && player.isLocal) ?? false
 
   useEffect(() => {
     if (!botHand || botHand.isComplete || !botPlayer?.isBot) return
@@ -82,6 +87,21 @@ export default function TablePage() {
     }).catch(error => console.error('Could not publish online presence', error))
     return () => { void leavePresence(channel) }
   }, [game?.config.roomCode])
+
+  useEffect(() => {
+    if (game?.config.mode !== 'online' || !game.config.roomCode) return
+    const channel = subscribeToRoomChat(game.config.roomCode, message => setChat(current => [...current.slice(-19), message]))
+    if (!isLocalHost) return () => {
+      if (channel && supabase) void supabase.removeChannel(channel)
+    }
+    const loadRequests = () => void listRoomJoinRequests(game.config.roomCode!).then(setJoinRequests).catch(error => console.error('Could not load join requests', error))
+    loadRequests()
+    const timer = window.setInterval(loadRequests, 3000)
+    return () => {
+      window.clearInterval(timer)
+      if (channel && supabase) void supabase.removeChannel(channel)
+    }
+  }, [game?.config.mode, game?.config.roomCode, isLocalHost])
 
   useEffect(() => {
     if (!bluffAlert) return
@@ -187,6 +207,19 @@ export default function TablePage() {
     navigate('/')
   }
 
+  async function submitChat(event: FormEvent) {
+    event.preventDefault()
+    const currentGame = useGameStore.getState().game
+    if (!currentGame?.config.roomCode || !chatMessage.trim()) return
+    const sender = currentGame.players.find(player => player.isLocal)?.name ?? 'Player'
+    try {
+      await sendRoomChat(currentGame.config.roomCode, sender, chatMessage)
+      setChatMessage('')
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not send chat message')
+    }
+  }
+
   return (
     <div className="min-h-dvh flex flex-col table-shell">
       {bluffAlert && (
@@ -252,6 +285,23 @@ export default function TablePage() {
               {!hand ? 'Start a hand when everyone is seated.' : hand.isComplete ? 'Showdown complete' : canControlTurn ? 'Your turn to act' : activePlayer?.isBot ? `${activePlayer.name} is deciding` : `Waiting for ${activePlayer?.name ?? 'the active player'}`}
             </p>
           </div>
+          {game.config.mode === 'online' && game.players.length < 3 && (
+            <div className="mx-auto mt-3 w-[min(92%,34rem)] border border-amber-400/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
+              Waiting for at least 2 more players. The first hand unlocks when 3 players are seated.
+            </div>
+          )}
+          {game.config.mode === 'online' && joinRequests.length > 0 && game.players.some(player => player.seat === 0 && player.isLocal) && (
+            <div className="mx-auto mt-3 w-[min(92%,34rem)] border border-emerald-400/40 bg-emerald-950/30 px-4 py-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">Join requests</p>
+              {joinRequests.map(request => (
+                <div key={request.id} className="mt-2 flex items-center gap-2 text-sm">
+                  <span className="flex-1">{request.requesterName}</span>
+                  <button onClick={() => void respondToRoomJoinRequest(request.id, 'approved').then(() => setJoinRequests(current => current.filter(item => item.id !== request.id)))} className="border border-emerald-300 px-2 py-1 text-xs font-bold text-emerald-200">Approve</button>
+                  <button onClick={() => void respondToRoomJoinRequest(request.id, 'declined').then(() => setJoinRequests(current => current.filter(item => item.id !== request.id)))} className="border border-slate-600 px-2 py-1 text-xs text-slate-300">Decline</button>
+                </div>
+              ))}
+            </div>
+          )}
           {hand && game.config.mode !== 'chipless' && (
             <button
               type="button"
@@ -421,7 +471,7 @@ export default function TablePage() {
                   <div className="text-[11px] font-mono font-medium" style={{ color: 'var(--text-accent)' }}>
                     ${player.stack}
                   </div>
-                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && ((!player.isLocal && (!player.isActive || hand.isComplete)) || (player.isLocal && (showOwnCards || hand.isComplete))) && (
+                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && ((!player.isLocal && (game.config.mode !== 'online' || !player.isActive || hand.isComplete)) || (player.isLocal && (showOwnCards || hand.isComplete))) && (
                     <div className="flex gap-1 justify-center mt-1">
                       {player.holeCards.map(card => {
                         const symbol = { S: '♠', H: '♥', D: '♦', C: '♣' }[card.suit]
@@ -452,6 +502,19 @@ export default function TablePage() {
         </div>
       </section>
 
+      {game.config.mode === 'online' && (
+        <section className="mx-auto mb-3 w-[min(92%,34rem)] border border-slate-700 bg-slate-900/80 p-3">
+          <div className="mb-2 max-h-24 space-y-1 overflow-y-auto text-xs">
+            {chat.length === 0 && <p className="text-slate-500">Room chat is ready.</p>}
+            {chat.map((item, index) => <p key={`${item.senderName}-${index}`}><strong className="text-amber-300">{item.senderName}:</strong> <span className="text-slate-300">{item.message}</span></p>)}
+          </div>
+          <form onSubmit={submitChat} className="flex gap-2">
+            <input value={chatMessage} onChange={event => setChatMessage(event.target.value)} maxLength={300} placeholder="Message the table" className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs" />
+            <button className="border border-amber-400 px-3 py-2 text-xs font-bold text-amber-300">Send</button>
+          </form>
+        </section>
+      )}
+
       {/* Action Bar */}
       <div className="glass border-t p-4 pb-safe" style={{ borderColor: 'var(--border-subtle)' }}>
         {!hand || hand.isComplete ? (
@@ -476,11 +539,11 @@ export default function TablePage() {
             )}
             <button
               onClick={startNextHand}
-              disabled={game.config.mode === 'online' && Boolean(hand?.isComplete)}
+              disabled={(game.config.mode === 'online' && (Boolean(hand?.isComplete) || game.players.length < 3))}
               className="w-full py-4 rounded-xl font-bold border border-gold/50 text-gold disabled:cursor-wait disabled:opacity-60"
               style={{ color: 'var(--color-gold)', borderColor: 'var(--color-gold-dim)' }}
             >
-              {game.config.mode === 'online' && hand?.isComplete ? 'Revealing Showdown...' : hand ? 'Start Next Hand' : 'Start First Hand'}
+              {game.config.mode === 'online' && game.players.length < 3 ? 'Waiting for 3 players...' : game.config.mode === 'online' && hand?.isComplete ? 'Revealing Showdown...' : hand ? 'Start Next Hand' : 'Start First Hand'}
             </button>
             <p className="text-center text-xs text-muted/50">Tip: Tap a player to process a Rebuy.</p>
           </div>

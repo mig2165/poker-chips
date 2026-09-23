@@ -1,11 +1,29 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
+import { listPublicRooms, requestRoomJoin, type PublicRoom } from '../lib/onlineRoom'
 
 export default function LobbyPage() {
   const navigate = useNavigate()
   const [roomCode, setRoomCode] = useState('')
+  const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([])
+  const [roomMessage, setRoomMessage] = useState('')
   const activeGame = useGameStore(state => state.game)
+
+  useEffect(() => {
+    void listPublicRooms().then(setPublicRooms).catch(() => setPublicRooms([]))
+  }, [])
+
+  async function requestSeat(room: PublicRoom) {
+    const name = window.prompt('Name to show at the table:', 'Guest')
+    if (name === null) return
+    try {
+      await requestRoomJoin(room.roomCode, name)
+      setRoomMessage(`Request sent to ${room.hostName}. Use the room code after the host approves you.`)
+    } catch (error) {
+      setRoomMessage(error instanceof Error ? error.message : 'Could not request a seat')
+    }
+  }
 
   function handleNewGame() {
     navigate(activeGame ? '/table' : '/settings')
@@ -93,6 +111,20 @@ export default function LobbyPage() {
           <div className="mt-3 flex gap-2">
             <input value={roomCode} onChange={event => setRoomCode(event.target.value)} placeholder="Room code" className="min-w-0 flex-1 rounded-lg border bg-slate-950 px-3 py-2 text-sm" />
             <button onClick={() => roomCode.trim() && navigate(`/spectate/${roomCode.trim().toUpperCase()}`)} className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-bold text-amber-300">Watch</button>
+          </div>
+          <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
+            <h2 className="text-sm font-bold">Public rooms</h2>
+            <p className="mt-1 text-xs text-slate-400">Request a seat in a room whose host has made it discoverable.</p>
+            {roomMessage && <p className="mt-2 text-xs text-emerald-300">{roomMessage}</p>}
+            <div className="mt-3 space-y-2">
+              {publicRooms.length === 0 && <p className="text-xs text-slate-500">No public rooms are waiting right now.</p>}
+              {publicRooms.map(room => (
+                <div key={room.roomCode} className="flex items-center gap-3 border border-slate-700 px-3 py-2">
+                  <div className="flex-1 text-xs"><strong>{room.hostName}'s room</strong><br /><span className="text-slate-500">{room.playerCount}/{room.maxPlayers} players · code {room.roomCode}</span></div>
+                  <button onClick={() => void requestSeat(room)} className="border border-emerald-400/60 px-2 py-1 text-xs font-bold text-emerald-300">Request seat</button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

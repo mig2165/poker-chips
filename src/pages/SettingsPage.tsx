@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [friendMessage, setFriendMessage] = useState('')
   const [mode, setMode] = useState<'local' | 'bots' | 'online' | 'chipless'>('local')
   const [roomCode, setRoomCode] = useState('')
+  const [isPublic, setIsPublic] = useState(false)
   const [minimumBet, setMinimumBet] = useState(defaultConfig.minimumBet.toString())
   const [useBlinds, setUseBlinds] = useState(defaultConfig.useBlinds)
   const [smallBlind, setSmallBlind] = useState(defaultConfig.smallBlind.toString())
@@ -83,7 +84,7 @@ export default function SettingsPage() {
 
     // Create the game in the store
     const finalRoomCode = mode === 'online' ? (roomCode.trim().toUpperCase() || Math.random().toString(36).slice(2, 8).toUpperCase()) : undefined
-    createGame({ buyIn: finalBuyIn, maxPlayers: 7, mode, roomCode: finalRoomCode, minimumBet: finalMinimumBet, useBlinds, smallBlind: finalSmallBlind, bigBlind: finalBigBlind })
+    createGame({ buyIn: finalBuyIn, maxPlayers: 7, mode, roomCode: finalRoomCode, isPublic, minimumBet: finalMinimumBet, useBlinds, smallBlind: finalSmallBlind, bigBlind: finalBigBlind })
 
     // Initialize players
     const names = mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : mode === 'online' ? ['You'] : playerNames
@@ -219,7 +220,14 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
+          <p className="mt-3 text-xs text-slate-400">Home table is for people physically together using one device. Bots is the solo option. Online is for remote players joining the same room.</p>
           {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>You start alone. Share the room code, or invite an accepted friend below. Friends join as they connect.</p>}
+          {mode === 'online' && (
+            <label className="mt-3 flex items-start gap-2 text-xs text-slate-300">
+              <input type="checkbox" checked={isPublic} onChange={event => setIsPublic(event.target.checked)} />
+              <span><strong>Public room</strong><br /><span className="text-slate-500">Anyone can discover this room and request a seat. Turn this off for invite/link/code only.</span></span>
+            </label>
+          )}
           {mode === 'online' && (
             <input
               value={roomCode}
