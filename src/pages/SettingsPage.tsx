@@ -20,7 +20,7 @@ export default function SettingsPage() {
   const [friends, setFriends] = useState<Friend[]>([])
   const [invitedFriends, setInvitedFriends] = useState<Friend[]>([])
   const [friendMessage, setFriendMessage] = useState('')
-  const [mode, setMode] = useState<'local' | 'bots' | 'online' | 'chipless'>('local')
+  const [mode, setMode] = useState<'local' | 'bots' | 'online' | 'chipless'>('bots')
   const [roomCode, setRoomCode] = useState('')
   const [isPublic, setIsPublic] = useState(false)
   const [minimumBet, setMinimumBet] = useState(defaultConfig.minimumBet.toString())
@@ -207,9 +207,8 @@ export default function SettingsPage() {
         {/* Players List */}
         <section className="rounded-2xl p-5 border shrink-0" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}>
           <h2 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Game Mode</h2>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {([
-              ['local', 'Home table', 'Everyone visible'],
               ['bots', 'Solo vs bots', 'You + 2 bots'],
               ['online', 'Online room', 'Share a room code'],
               ['chipless', 'Chipless', 'Track real chips'],
@@ -220,7 +219,7 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-400">Home table is for people physically together using one device. Bots is the solo option. Online is for remote players joining the same room.</p>
+          <p className="mt-3 text-xs text-slate-400">Use Chipless for an in-person game with real cards, Online for remote players, or Bots for solo practice. There is no shared-screen card mode because it would expose every player&apos;s cards.</p>
           {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>You start alone. Share the room code, or invite an accepted friend below. Friends join as they connect.</p>}
           {mode === 'online' && (
             <label className="mt-3 flex items-start gap-2 text-xs text-slate-300">
