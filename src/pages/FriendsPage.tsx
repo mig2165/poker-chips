@@ -22,6 +22,7 @@ export default function FriendsPage() {
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([])
   const [notice, setNotice] = useState('')
+  const [signedIn, setSignedIn] = useState<boolean | null>(null)
   const previousOnline = useRef(new Set<string>())
 
   async function addFriend(event: FormEvent) {
@@ -41,7 +42,11 @@ export default function FriendsPage() {
     void (async () => {
       if (!supabase) return
       const { data: current } = await supabase.auth.getUser()
-      if (!current.user) return
+      if (!current.user || current.user.is_anonymous) {
+        setSignedIn(false)
+        return
+      }
+      setSignedIn(true)
       const { data: requests } = await supabase
         .from('friend_requests')
         .select('sender_id, receiver_id')
@@ -93,6 +98,14 @@ export default function FriendsPage() {
     <main className="mx-auto max-w-md px-6 py-12">
       <h1 className="text-3xl font-extrabold">Friends</h1>
       <p className="mt-2 text-sm text-slate-400">Add players by username and see when friends are available to watch.</p>
+      {signedIn === false && (
+        <section className="mt-8 border border-slate-700 bg-slate-900 p-5">
+          <p className="text-sm text-slate-300">Sign in to add friends, accept requests, and see which friends are online.</p>
+          <button onClick={() => navigate('/auth')} className="mt-4 rounded-lg bg-amber-400 px-4 py-2 text-sm font-bold text-slate-950">Sign in</button>
+        </section>
+      )}
+      {signedIn !== false && (
+        <>
       <form onSubmit={addFriend} className="mt-8 flex gap-2">
         <input required value={username} onChange={event => setUsername(event.target.value)} placeholder="Username" className="min-w-0 flex-1 rounded-lg border bg-slate-900 px-3 py-3" />
         <button className="rounded-lg bg-amber-400 px-4 font-bold text-slate-950">Add</button>
@@ -129,6 +142,8 @@ export default function FriendsPage() {
           })}
         </div>
       </section>
+        </>
+      )}
     </main>
   )
 }

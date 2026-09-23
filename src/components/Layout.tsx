@@ -1,4 +1,6 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { signOut, supabase } from '../lib/supabase'
 
 const navItems = [
   {
@@ -39,9 +41,54 @@ const navItems = [
 
 export default function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const [username, setUsername] = useState<string | null>(null)
+
+  useEffect(() => {
+    const client = supabase
+    if (!client) return
+
+    let mounted = true
+    const loadUser = async () => {
+      const { data } = await client.auth.getUser()
+      const user = data.user
+      if (!mounted || !user || user.is_anonymous) {
+        if (mounted) setUsername(null)
+        return
+      }
+      const { data: profile } = await client.from('profiles').select('username').eq('id', user.id).maybeSingle()
+      if (mounted) setUsername(profile?.username ?? String(user.user_metadata?.username ?? user.email?.split('@')[0] ?? 'Player'))
+    }
+
+    void loadUser()
+    const { data: listener } = client.auth.onAuthStateChange(() => {
+      void loadUser()
+    })
+    return () => {
+      mounted = false
+      listener.subscription.unsubscribe()
+    }
+  }, [])
+
+  async function handleSignOut() {
+    await signOut()
+    setUsername(null)
+    navigate('/')
+  }
 
   return (
     <div className="flex flex-col min-h-dvh">
+      <header className="flex items-center justify-end px-5 pt-4">
+        {username ? (
+          <div className="flex items-center gap-3 text-sm">
+            <NavLink to="/profile" className="font-semibold text-slate-200 hover:text-amber-300">{username}</NavLink>
+            <button onClick={() => void handleSignOut()} className="text-slate-400 underline hover:text-slate-200">Log out</button>
+          </div>
+        ) : (
+          <NavLink to="/auth" className="text-sm font-semibold text-amber-300 underline">Sign in</NavLink>
+        )}
+      </header>
+
       {/* Page Content */}
       <main className="flex-1 pb-safe">
         <div key={location.pathname} className="page-enter">
