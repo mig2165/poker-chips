@@ -82,6 +82,7 @@ create table if not exists public.profiles (
 alter table public.profiles add column if not exists games_played integer not null default 0;
 alter table public.profiles add column if not exists total_won integer not null default 0;
 alter table public.profiles add column if not exists total_lost integer not null default 0;
+create unique index if not exists profiles_username_lower_idx on public.profiles (lower(username));
 
 alter table public.profiles enable row level security;
 drop policy if exists "Profiles are publicly searchable" on public.profiles;

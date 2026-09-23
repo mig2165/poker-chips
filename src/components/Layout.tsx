@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { signOut, supabase } from '../lib/supabase'
 
 const navItems = [
@@ -50,13 +51,10 @@ export default function Layout() {
 
     let mounted = true
     let requestId = 0
-    const loadUser = async () => {
+    const loadUser = async (user: User | null) => {
       const currentRequestId = ++requestId
-      const { data } = await client.auth.getUser()
-      const user = data.user
-      if (!mounted || currentRequestId !== requestId) return
       if (!user || user.is_anonymous) {
-        setUsername(null)
+        if (mounted && currentRequestId === requestId) setUsername(null)
         return
       }
       const { data: profile } = await client.from('profiles').select('username').eq('id', user.id).maybeSingle()
@@ -64,9 +62,9 @@ export default function Layout() {
       setUsername(profile?.username ?? String(user.user_metadata?.username ?? user.email?.split('@')[0] ?? 'Player'))
     }
 
-    void loadUser()
-    const { data: listener } = client.auth.onAuthStateChange(() => {
-      void loadUser()
+    void client.auth.getSession().then(({ data }) => loadUser(data.session?.user ?? null))
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      void loadUser(session?.user ?? null)
     })
     return () => {
       mounted = false

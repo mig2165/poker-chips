@@ -27,15 +27,28 @@ export async function signIn(email: string, password: string): Promise<void> {
 
 export async function signUp(email: string, password: string, username: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured')
-  const { error } = await supabase.auth.signUp({
+  const normalizedUsername = username.trim()
+  const escapedUsername = normalizedUsername.replace(/([\\%_])/g, '\\$1')
+  const { data: existingProfile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('username', escapedUsername)
+    .maybeSingle()
+  if (profileError) throw profileError
+  if (existingProfile) throw new Error('That username is already taken. Choose another one.')
+
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: { username },
+      data: { username: normalizedUsername, display_name: normalizedUsername },
       emailRedirectTo: window.location.origin,
     },
   })
   if (error) throw error
+  if (data.user?.identities?.length === 0) {
+    throw new Error('An account with that email already exists. Sign in instead.')
+  }
 }
 
 export async function signOut(): Promise<void> {
