@@ -88,6 +88,7 @@ interface GameStore {
 
   /** Reset everything. */
   reset: () => void
+  leaveTable: () => Promise<void>
   connectOnlineRoom: (roomCode: string, playerId?: string) => Promise<void>
   publishOnlineGame: () => Promise<void>
   disconnectOnlineRoom: () => Promise<void>
@@ -181,6 +182,11 @@ export const useGameStore = create<GameStore>((set) => ({
     }),
 
   reset: () => set({ game: null }),
+  leaveTable: async () => {
+    await leaveRoom(roomChannel)
+    roomChannel = null
+    set({ game: null, bluffAlert: null })
+  },
   clearBluffAlert: () => set({ bluffAlert: null }),
   connectOnlineRoom: async (roomCode, playerId) => {
     const remote = await loadRoom(roomCode)

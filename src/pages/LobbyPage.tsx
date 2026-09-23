@@ -1,12 +1,14 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
+import { useGameStore } from '../store/useGameStore'
 
 export default function LobbyPage() {
   const navigate = useNavigate()
   const [roomCode, setRoomCode] = useState('')
+  const activeGame = useGameStore(state => state.game)
 
   function handleNewGame() {
-    navigate('/settings')
+    navigate(activeGame ? '/table' : '/settings')
   }
 
   return (

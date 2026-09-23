@@ -13,6 +13,7 @@ interface Friend {
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { defaultConfig, updateConfig, createGame, joinOnlineRoom } = useGameStore()
+  const activeGame = useGameStore(state => state.game)
 
   const [buyIn, setBuyIn] = useState(defaultConfig.buyIn.toString())
   const [playerNames, setPlayerNames] = useState<string[]>(['You', 'Player 2'])
@@ -25,6 +26,10 @@ export default function SettingsPage() {
   const [useBlinds, setUseBlinds] = useState(defaultConfig.useBlinds)
   const [smallBlind, setSmallBlind] = useState(defaultConfig.smallBlind.toString())
   const [bigBlind, setBigBlind] = useState(defaultConfig.bigBlind.toString())
+
+  useEffect(() => {
+    if (activeGame) navigate('/table', { replace: true })
+  }, [activeGame, navigate])
 
   useEffect(() => {
     if (!supabase) return
