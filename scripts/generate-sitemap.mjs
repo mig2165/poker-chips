@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 
-const siteUrl = (globalThis.process?.env.SITE_URL || 'https://poker-chips-tracker.onrender.com')
+const siteUrl = (globalThis.process?.env.SITE_URL || 'https://poker-chips-tracker-3lc5.onrender.com')
   .trim()
   .replace(/\/+$/, '')
 

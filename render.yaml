@@ -5,7 +5,7 @@ services:
     autoDeploy: false
     envVars:
       - key: SITE_URL
-        value: https://poker-chips-tracker.onrender.com
+        value: https://poker-chips-tracker-3lc5.onrender.com
       - key: VITE_SUPABASE_URL
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
