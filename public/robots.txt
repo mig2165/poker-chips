@@ -1,2 +1,3 @@
 User-agent: *
 Allow: /
+Sitemap: https://poker-chips-tracker.onrender.com/sitemap.xml
