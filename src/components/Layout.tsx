@@ -49,15 +49,19 @@ export default function Layout() {
     if (!client) return
 
     let mounted = true
+    let requestId = 0
     const loadUser = async () => {
+      const currentRequestId = ++requestId
       const { data } = await client.auth.getUser()
       const user = data.user
-      if (!mounted || !user || user.is_anonymous) {
-        if (mounted) setUsername(null)
+      if (!mounted || currentRequestId !== requestId) return
+      if (!user || user.is_anonymous) {
+        setUsername(null)
         return
       }
       const { data: profile } = await client.from('profiles').select('username').eq('id', user.id).maybeSingle()
-      if (mounted) setUsername(profile?.username ?? String(user.user_metadata?.username ?? user.email?.split('@')[0] ?? 'Player'))
+      if (!mounted || currentRequestId !== requestId) return
+      setUsername(profile?.username ?? String(user.user_metadata?.username ?? user.email?.split('@')[0] ?? 'Player'))
     }
 
     void loadUser()
