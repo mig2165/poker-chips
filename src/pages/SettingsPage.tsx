@@ -195,6 +195,7 @@ export default function SettingsPage() {
 
         <section className="rounded-2xl border p-5" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}>
           <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Betting Rules</h2>
+          <p className="mb-4 text-xs leading-5 text-slate-400">Buy-in is your starting stack. Minimum bet is the smallest wager during a betting round. Blinds are forced opening bets and are separate from both.</p>
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-slate-400">Minimum bet
               <input type="number" min={1} value={minimumBet} onChange={event => setMinimumBet(event.target.value)} className="mt-1 w-full rounded-xl border bg-slate-800 px-3 py-2 text-sm text-white" />

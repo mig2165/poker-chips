@@ -9,7 +9,10 @@ type PublicGameState = Omit<GameState, 'players'> & {
 function publicState(game: GameState, revealCards: boolean): PublicGameState {
   return {
     ...game,
-    players: game.players.map(player => ({ ...player, holeCards: revealCards ? player.holeCards : [] })),
+    players: game.players.map(player => ({
+      ...player,
+      holeCards: revealCards || !player.isActive ? player.holeCards : [],
+    })),
   }
 }
 

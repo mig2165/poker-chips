@@ -19,7 +19,7 @@ export default function AuthPage() {
         setMessage('Account created. Check your email if confirmation is enabled.')
       } else {
         await signIn(email, password)
-        navigate('/')
+        navigate('/profile')
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Authentication failed')

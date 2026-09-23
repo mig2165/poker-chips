@@ -4,6 +4,8 @@ import ActionLogDrawer from '../components/ActionLogDrawer'
 import { useGameStore } from '../store/useGameStore'
 import { decideBotAction } from '../engine'
 import type { Player, LogActionType } from '../engine'
+import { leavePresence, subscribeToUserPresence, supabase } from '../lib/supabase'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 interface SeatPosition {
   x: number
@@ -34,6 +36,7 @@ export default function TablePage() {
   const [betAmount, setBetAmount] = useState('')
   const [betType, setBetType] = useState<'bet' | 'raise'>('bet')
   const [isSelectingWinner, setIsSelectingWinner] = useState(false)
+  const [showOwnCards, setShowOwnCards] = useState(false)
 
   const botHand = game?.hand
   const botPlayer = botHand && game ? game.players[botHand.currentPlayerIndex] : null
@@ -66,6 +69,19 @@ export default function TablePage() {
       void disconnectOnlineRoom()
     }
   }, [connectOnlineRoom, disconnectOnlineRoom, game?.config.mode, game?.config.roomCode, localPlayerId])
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null
+    if (!supabase || !game?.config.roomCode) return
+    const client = supabase
+    void client.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return
+      const { data: profile } = await client.from('profiles').select('username').eq('id', data.user.id).maybeSingle()
+      if (!profile?.username) return
+      channel = await subscribeToUserPresence({ userId: data.user.id, username: profile.username, roomCode: game.config.roomCode }, () => {})
+    }).catch(error => console.error('Could not publish online presence', error))
+    return () => { void leavePresence(channel) }
+  }, [game?.config.roomCode])
 
   useEffect(() => {
     if (!bluffAlert) return
@@ -224,6 +240,16 @@ export default function TablePage() {
               {!hand ? 'Start a hand when everyone is seated.' : hand.isComplete ? 'Showdown complete' : canControlTurn ? 'Your turn to act' : activePlayer?.isBot ? `${activePlayer.name} is deciding` : `Waiting for ${activePlayer?.name ?? 'the active player'}`}
             </p>
           </div>
+          {hand && game.config.mode !== 'chipless' && (
+            <button
+              type="button"
+              aria-pressed={showOwnCards}
+              onClick={() => setShowOwnCards(current => !current)}
+              className="mx-auto mt-2 border border-slate-600 px-3 py-2 text-xs font-bold text-slate-200 transition-colors hover:border-amber-300 hover:text-amber-200"
+            >
+              {showOwnCards ? 'Hide my cards' : 'Show my cards'}
+            </button>
+          )}
           {hand && !hand.isComplete && (
             <div className="text-right">
               <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>To call</p>
@@ -383,7 +409,7 @@ export default function TablePage() {
                   <div className="text-[11px] font-mono font-medium" style={{ color: 'var(--text-accent)' }}>
                     ${player.stack}
                   </div>
-                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && (player.isLocal || hand.isComplete) && (
+                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && ((!player.isLocal && (!player.isActive || hand.isComplete)) || (player.isLocal && (showOwnCards || hand.isComplete))) && (
                     <div className="flex gap-1 justify-center mt-1">
                       {player.holeCards.map(card => {
                         const symbol = { S: '♠', H: '♥', D: '♦', C: '♣' }[card.suit]

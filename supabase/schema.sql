@@ -8,12 +8,15 @@ create table if not exists public.rooms (
 
 alter table public.rooms enable row level security;
 
+drop policy if exists "Anyone can read rooms" on public.rooms;
 create policy "Anyone can read rooms"
 on public.rooms for select to anon, authenticated using (true);
 
+drop policy if exists "Signed-in sessions can create rooms" on public.rooms;
 create policy "Signed-in sessions can create rooms"
 on public.rooms for insert to anon, authenticated with check (true);
 
+drop policy if exists "Signed-in sessions can update rooms" on public.rooms;
 create policy "Signed-in sessions can update rooms"
 on public.rooms for update to authenticated using (true) with check (true);
 
@@ -42,12 +45,15 @@ create table if not exists public.room_players (
 
 alter table public.room_players enable row level security;
 
+drop policy if exists "Players can read their own private cards" on public.room_players;
 create policy "Players can read their own private cards"
 on public.room_players for select to authenticated using (auth.uid() = owner_id);
 
+drop policy if exists "Players can write their own private cards" on public.room_players;
 create policy "Players can write their own private cards"
 on public.room_players for insert to authenticated with check (auth.uid() = owner_id);
 
+drop policy if exists "Players can update their own private cards" on public.room_players;
 create policy "Players can update their own private cards"
 on public.room_players for update to authenticated using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 
@@ -67,12 +73,22 @@ $$;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
+  games_played integer not null default 0,
+  total_won integer not null default 0,
+  total_lost integer not null default 0,
   created_at timestamptz not null default now()
 );
 
+alter table public.profiles add column if not exists games_played integer not null default 0;
+alter table public.profiles add column if not exists total_won integer not null default 0;
+alter table public.profiles add column if not exists total_lost integer not null default 0;
+
 alter table public.profiles enable row level security;
+drop policy if exists "Profiles are publicly searchable" on public.profiles;
 create policy "Profiles are publicly searchable" on public.profiles for select to anon, authenticated using (true);
+drop policy if exists "Users manage their own profile" on public.profiles;
 create policy "Users manage their own profile" on public.profiles for insert to authenticated with check (auth.uid() = id);
+drop policy if exists "Users update their own profile" on public.profiles;
 create policy "Users update their own profile" on public.profiles for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 
 create or replace function public.create_profile_for_user()
@@ -87,6 +103,45 @@ begin
   return new;
 end;
 $$;
+
+create table if not exists public.profile_game_results (
+  profile_id uuid not null references auth.users(id) on delete cascade,
+  game_id text not null,
+  hand_number integer not null,
+  net_change integer not null,
+  created_at timestamptz not null default now(),
+  primary key (profile_id, game_id, hand_number)
+);
+
+alter table public.profile_game_results enable row level security;
+drop policy if exists "Users can read their own game results" on public.profile_game_results;
+create policy "Users can read their own game results"
+on public.profile_game_results for select to authenticated using (auth.uid() = profile_id);
+
+create or replace function public.record_profile_game(game_id text, hand_number integer, net_change integer)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profile_game_results (profile_id, game_id, hand_number, net_change)
+  values (auth.uid(), game_id, hand_number, net_change)
+  on conflict (profile_id, game_id, hand_number) do nothing;
+
+  if not found then
+    return;
+  end if;
+
+  update public.profiles
+  set games_played = games_played + 1,
+      total_won = total_won + greatest(net_change, 0),
+      total_lost = total_lost + greatest(-net_change, 0)
+  where id = auth.uid();
+end;
+$$;
+
+revoke all on function public.record_profile_game(text, integer, integer) from public;
+grant execute on function public.record_profile_game(text, integer, integer) to authenticated;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -103,6 +158,9 @@ create table if not exists public.friend_requests (
 );
 
 alter table public.friend_requests enable row level security;
+drop policy if exists "Users see their friend requests" on public.friend_requests;
 create policy "Users see their friend requests" on public.friend_requests for select to authenticated using (auth.uid() = sender_id or auth.uid() = receiver_id);
+drop policy if exists "Users send friend requests" on public.friend_requests;
 create policy "Users send friend requests" on public.friend_requests for insert to authenticated with check (auth.uid() = sender_id);
+drop policy if exists "Receivers update friend requests" on public.friend_requests;
 create policy "Receivers update friend requests" on public.friend_requests for update to authenticated using (auth.uid() = receiver_id) with check (auth.uid() = receiver_id);

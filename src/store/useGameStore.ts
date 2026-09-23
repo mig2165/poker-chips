@@ -11,6 +11,7 @@ import type { GameConfig, GameState, LogEntry, LogActionType } from '../engine'
 import type { Player } from '../engine'
 import { compareEvaluatedHands, evaluateCards } from '../engine/handEvaluator'
 import { loadRoom, publishRoom, subscribeToRoom, leaveRoom, savePrivateCards, loadPrivateCards } from '../lib/onlineRoom'
+import { recordProfileGame } from '../lib/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 let roomChannel: RealtimeChannel | null = null
@@ -145,8 +146,13 @@ export const useGameStore = create<GameStore>((set) => ({
   awardPotToPlayer: (winnerIds) =>
     set((state) => {
       if (!state.game) return state
+      const localBefore = state.game.players.find(player => player.isLocal)?.stack ?? 0
+      const gameId = state.game.id
+      const handNumber = state.game.hand?.handNumber ?? 0
       const game = awardPot(state.game, winnerIds)
       syncGame(game)
+      const localAfter = game.players.find(player => player.isLocal)?.stack ?? localBefore
+      void recordProfileGame(gameId, handNumber, localAfter - localBefore).catch(error => console.error('Profile stats update failed', error))
       return { game }
     }),
 
@@ -189,7 +195,7 @@ export const useGameStore = create<GameStore>((set) => ({
           const local = state.game?.players.find(player => player.id === remotePlayer.id)
           return {
             ...remotePlayer,
-            holeCards: remoteGame.hand?.revealAllCards ? remotePlayer.holeCards : local?.holeCards ?? [],
+            holeCards: remoteGame.hand?.revealAllCards || !remotePlayer.isActive ? remotePlayer.holeCards : local?.holeCards ?? [],
           }
         })
         const mergedGame = { ...remoteGame, players: mergedPlayers }
@@ -243,7 +249,9 @@ export const useGameStore = create<GameStore>((set) => ({
           ...remoteGame,
           players: remoteGame.players.map(remotePlayer => ({
             ...remotePlayer,
-            holeCards: state.game?.players.find(item => item.id === remotePlayer.id)?.holeCards ?? [],
+            holeCards: !remotePlayer.isActive
+              ? remotePlayer.holeCards
+              : state.game?.players.find(item => item.id === remotePlayer.id)?.holeCards ?? [],
           })),
         }
         scheduleOnlineResolution(mergedGame)

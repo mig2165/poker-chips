@@ -9,6 +9,7 @@ import AuthPage from './pages/AuthPage'
 import SpectatePage from './pages/SpectatePage'
 import FriendsPage from './pages/FriendsPage'
 import HandDeciderPage from './pages/HandDeciderPage'
+import ProfilePage from './pages/ProfilePage'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/spectate/:roomCode" element={<SpectatePage />} />
         <Route path="/friends" element={<FriendsPage />} />
         <Route path="/hand-decider" element={<HandDeciderPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
