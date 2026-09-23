@@ -37,7 +37,6 @@ export default function LobbyPage() {
       {/* Quick Actions */}
       <section className="flex-1 px-5 pb-6 flex flex-col gap-4">
         <div className="flex justify-end gap-3 text-sm">
-          <button onClick={() => navigate('/auth')} className="text-amber-300 underline">Sign in</button>
           <button onClick={() => navigate('/profile')} className="text-slate-300 underline">Profile</button>
           <button onClick={() => navigate('/friends')} className="text-slate-300 underline">Friends</button>
         </div>
