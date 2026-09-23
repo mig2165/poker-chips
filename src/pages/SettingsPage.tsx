@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/useGameStore'
 import type { Player } from '../engine'
 import { createRoom } from '../lib/onlineRoom'
-import { hasSupabaseConfig } from '../lib/supabase'
+import { hasSupabaseConfig, supabase } from '../lib/supabase'
+
+interface Friend {
+  id: string
+  username: string
+}
 
 export default function SettingsPage() {
   const navigate = useNavigate()
@@ -11,12 +16,32 @@ export default function SettingsPage() {
 
   const [buyIn, setBuyIn] = useState(defaultConfig.buyIn.toString())
   const [playerNames, setPlayerNames] = useState<string[]>(['You', 'Player 2'])
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [invitedFriends, setInvitedFriends] = useState<Friend[]>([])
+  const [friendMessage, setFriendMessage] = useState('')
   const [mode, setMode] = useState<'local' | 'bots' | 'online' | 'chipless'>('local')
   const [roomCode, setRoomCode] = useState('')
   const [minimumBet, setMinimumBet] = useState(defaultConfig.minimumBet.toString())
   const [useBlinds, setUseBlinds] = useState(defaultConfig.useBlinds)
   const [smallBlind, setSmallBlind] = useState(defaultConfig.smallBlind.toString())
   const [bigBlind, setBigBlind] = useState(defaultConfig.bigBlind.toString())
+
+  useEffect(() => {
+    if (!supabase) return
+    void (async () => {
+      const { data: current } = await supabase.auth.getUser()
+      if (!current.user || current.user.is_anonymous) return
+      const { data: requests } = await supabase
+        .from('friend_requests')
+        .select('sender_id, receiver_id')
+        .or(`sender_id.eq.${current.user.id},receiver_id.eq.${current.user.id}`)
+        .eq('status', 'accepted')
+      const friendIds = (requests ?? []).map(request => request.sender_id === current.user.id ? request.receiver_id : request.sender_id)
+      if (friendIds.length === 0) return
+      const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', friendIds)
+      setFriends(profiles ?? [])
+    })().catch(error => setFriendMessage(error instanceof Error ? error.message : 'Could not load friends'))
+  }, [])
 
   function handleAddPlayer() {
     if (playerNames.length < 7) {
@@ -25,7 +50,7 @@ export default function SettingsPage() {
   }
 
   function handleRemovePlayer(index: number) {
-    if (playerNames.length > 2) {
+    if (playerNames.length > 2 || (mode === 'online' && playerNames.length > 1)) {
       setPlayerNames(playerNames.filter((_, i) => i !== index))
     }
   }
@@ -34,6 +59,14 @@ export default function SettingsPage() {
     const newNames = [...playerNames]
     newNames[index] = newName
     setPlayerNames(newNames)
+  }
+
+  function inviteFriend(friend: Friend) {
+    if (invitedFriends.some(item => item.id === friend.id)) {
+      setInvitedFriends(current => current.filter(item => item.id !== friend.id))
+    } else if (invitedFriends.length < 6) {
+      setInvitedFriends(current => [...current, friend])
+    }
   }
 
   async function handleStartGame() {
@@ -48,7 +81,7 @@ export default function SettingsPage() {
     createGame({ buyIn: finalBuyIn, maxPlayers: 7, mode, roomCode: finalRoomCode, minimumBet: finalMinimumBet, useBlinds, smallBlind: finalSmallBlind, bigBlind: finalBigBlind })
 
     // Initialize players
-    const names = mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : playerNames
+    const names = mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : mode === 'online' ? ['You'] : playerNames
     const players: Player[] = names.map((name, index) => ({
       id: crypto.randomUUID(),
       name: name.trim() || `Player ${index + 1}`,
@@ -181,7 +214,7 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>Room code will be shown at the table. Connect a realtime room service to let remote players join this room.</p>}
+          {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>You start alone. Share the room code, or invite an accepted friend below. Friends join as they connect.</p>}
           {mode === 'online' && (
             <input
               value={roomCode}
@@ -228,9 +261,9 @@ export default function SettingsPage() {
             <h2 className="text-xs font-semibold uppercase tracking-widest"
               style={{ color: 'var(--text-muted)' }}
             >
-              Players ({mode === 'bots' ? 3 : playerNames.length}/7)
+              Players ({mode === 'bots' ? 3 : mode === 'online' ? 1 + invitedFriends.length : playerNames.length}/7)
             </h2>
-            {mode !== 'bots' && playerNames.length < 7 && (
+            {mode !== 'bots' && mode !== 'online' && playerNames.length < 7 && (
               <button
                 onClick={handleAddPlayer}
                 className="text-xs font-bold transition-colors"
@@ -242,7 +275,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
-            {(mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : playerNames).map((name, i) => (
+            {(mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : mode === 'online' ? ['You', ...invitedFriends.map(friend => friend.username)] : playerNames).map((name, i) => (
               <div key={i} className="flex items-center gap-2">
                 <div className="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold"
                   style={{ background: 'var(--surface-tertiary)', color: 'var(--text-muted)' }}
@@ -252,8 +285,8 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => mode !== 'bots' && handleNameChange(i, e.target.value)}
-                  readOnly={mode === 'bots'}
+                  onChange={(e) => mode !== 'bots' && mode !== 'online' && handleNameChange(i, e.target.value)}
+                  readOnly={mode === 'bots' || mode === 'online'}
                   placeholder={`Player ${i + 1}`}
                   className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border outline-none transition-all duration-200 focus:ring-2"
                   style={{
@@ -264,7 +297,11 @@ export default function SettingsPage() {
                     '--tw-ring-color': 'var(--border-active)',
                   }}
                 />
-                {mode !== 'bots' && playerNames.length > 2 && (
+                {mode === 'online' && i > 0 ? (
+                  <button onClick={() => inviteFriend(invitedFriends[i - 1])} className="p-2 shrink-0 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors" aria-label={`Remove ${name}`}>
+                    ×
+                  </button>
+                ) : mode !== 'bots' && playerNames.length > 2 ? (
                   <button
                     onClick={() => handleRemovePlayer(i)}
                     className="p-2 shrink-0 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
@@ -274,9 +311,23 @@ export default function SettingsPage() {
                       <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
                   </button>
-                )}
+                ) : null}
               </div>
             ))}
+            {mode === 'online' && (
+              <div className="border-t border-slate-700 pt-3">
+                <p className="text-xs text-slate-400">Invite an accepted friend</p>
+                {friendMessage && <p className="mt-2 text-xs text-amber-300">{friendMessage}</p>}
+                {friends.length === 0 && !friendMessage && <p className="mt-2 text-xs text-slate-500">No accepted friends available yet.</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {friends.filter(friend => !invitedFriends.some(invited => invited.id === friend.id)).map(friend => (
+                    <button key={friend.id} onClick={() => inviteFriend(friend)} className="rounded-lg border border-emerald-400/50 px-3 py-2 text-xs font-semibold text-emerald-300">
+                      + {friend.username}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
