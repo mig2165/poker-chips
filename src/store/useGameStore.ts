@@ -11,7 +11,7 @@ import type { GameConfig, GameState, LogEntry, LogActionType } from '../engine'
 import type { Player } from '../engine'
 import { compareEvaluatedHands, evaluateCards } from '../engine/handEvaluator'
 import { loadRoom, publishRoom, subscribeToRoom, leaveRoom, savePrivateCards, loadPrivateCards } from '../lib/onlineRoom'
-import { recordProfileGame } from '../lib/supabase'
+import { ensureAnonymousSession, recordProfileGame } from '../lib/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 let roomChannel: RealtimeChannel | null = null
@@ -222,6 +222,7 @@ export const useGameStore = create<GameStore>((set) => ({
     roomChannel = null
   },
   joinOnlineRoom: async (roomCode, playerName, buyIn) => {
+    await ensureAnonymousSession()
     const remote = await loadRoom(roomCode)
     if (!remote) throw new Error('Room not found')
     if (remote.players.length >= remote.config.maxPlayers) throw new Error('This room is full')

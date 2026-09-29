@@ -220,21 +220,34 @@ export default function SettingsPage() {
             ))}
           </div>
           <p className="mt-3 text-xs text-slate-400">Use Chipless for an in-person game with real cards, Online for remote players, or Bots for solo practice. There is no shared-screen card mode because it would expose every player&apos;s cards.</p>
-          {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>You start alone. Share the room code, or invite an accepted friend below. Friends join as they connect.</p>}
+          {mode === 'online' && <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>Choose whether everyone can find your new room or only people with its code/link can. You can invite accepted friends either way.</p>}
           {mode === 'online' && (
-            <label className="mt-3 flex items-start gap-2 text-xs text-slate-300">
-              <input type="checkbox" checked={isPublic} onChange={event => setIsPublic(event.target.checked)} />
-              <span><strong>Public room</strong><br /><span className="text-slate-500">Anyone can discover this room and request a seat. Turn this off for invite/link/code only.</span></span>
-            </label>
+            <fieldset className="mt-3">
+              <legend className="mb-2 text-xs font-semibold text-slate-300">Who can find this room?</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className={`flex cursor-pointer items-start gap-2 rounded-xl border p-3 text-xs ${isPublic ? 'border-emerald-400/70 bg-emerald-950/30' : 'border-slate-700 bg-slate-900/40'}`}>
+                  <input type="radio" name="room-visibility" checked={isPublic} onChange={() => setIsPublic(true)} />
+                  <span><strong className="text-slate-200">Public</strong><br /><span className="text-slate-400">Appears in the public room list. Anyone can request a seat.</span></span>
+                </label>
+                <label className={`flex cursor-pointer items-start gap-2 rounded-xl border p-3 text-xs ${!isPublic ? 'border-emerald-400/70 bg-emerald-950/30' : 'border-slate-700 bg-slate-900/40'}`}>
+                  <input type="radio" name="room-visibility" checked={!isPublic} onChange={() => setIsPublic(false)} />
+                  <span><strong className="text-slate-200">Private</strong><br /><span className="text-slate-400">Hidden from the public list. Join with the code or invite link.</span></span>
+                </label>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500">Friends can be invited to both public and private rooms.</p>
+            </fieldset>
           )}
           {mode === 'online' && (
-            <input
-              value={roomCode}
-              onChange={event => setRoomCode(event.target.value)}
-              placeholder="Leave blank to create a new room"
-              className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
-              style={{ background: 'var(--surface-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
-            />
+            <label className="mt-3 block text-xs text-slate-400">
+              Join an existing room instead (optional)
+              <input
+                value={roomCode}
+                onChange={event => setRoomCode(event.target.value.toUpperCase())}
+                placeholder="Enter its room code; leave blank to create a new room"
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                style={{ background: 'var(--surface-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+              />
+            </label>
           )}
         </section>
 

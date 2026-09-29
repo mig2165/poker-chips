@@ -1,14 +1,18 @@
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useGameStore } from '../store/useGameStore'
 import { listPublicRooms, requestRoomJoin, type PublicRoom } from '../lib/onlineRoom'
+import { hasSupabaseConfig } from '../lib/supabase'
 
 export default function LobbyPage() {
   const navigate = useNavigate()
-  const [roomCode, setRoomCode] = useState('')
+  const [joinCode, setJoinCode] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() ?? '')
+  const [spectateCode, setSpectateCode] = useState('')
+  const [playerName, setPlayerName] = useState('')
+  const [isJoiningRoom, setIsJoiningRoom] = useState(false)
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([])
   const [roomMessage, setRoomMessage] = useState('')
-  const activeGame = useGameStore(state => state.game)
+  const { game: activeGame, defaultConfig, joinOnlineRoom } = useGameStore()
 
   useEffect(() => {
     void listPublicRooms().then(setPublicRooms).catch(() => setPublicRooms([]))
@@ -27,6 +31,34 @@ export default function LobbyPage() {
 
   function handleNewGame() {
     navigate(activeGame ? '/table' : '/settings')
+  }
+
+  async function handleJoinRoom(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const code = joinCode.trim().toUpperCase()
+    if (!code) {
+      setRoomMessage('Enter the room code your friend shared with you.')
+      return
+    }
+    if (activeGame) {
+      setRoomMessage('Leave your current table before joining another one.')
+      return
+    }
+    if (!hasSupabaseConfig()) {
+      setRoomMessage('Online rooms are not configured on this site right now.')
+      return
+    }
+
+    setIsJoiningRoom(true)
+    setRoomMessage('')
+    try {
+      await joinOnlineRoom(code, playerName.trim() || 'Guest', defaultConfig.buyIn)
+      navigate('/table')
+    } catch (error) {
+      setRoomMessage(error instanceof Error ? error.message : 'Could not join this room.')
+    } finally {
+      setIsJoiningRoom(false)
+    }
   }
 
   return (
@@ -66,6 +98,38 @@ export default function LobbyPage() {
             Track a real home game, play a guided bot table, or run the rules yourself with physical cards.
           </p>
         </div>
+        <form onSubmit={event => void handleJoinRoom(event)} className="rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
+          <h2 className="text-sm font-bold">Join a private table</h2>
+          <p className="mt-1 text-xs leading-5 text-slate-400">Enter the room code your friend shared. You can join with a code even if the room is not public.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <input
+              value={joinCode}
+              onChange={event => setJoinCode(event.target.value.toUpperCase())}
+              placeholder="Room code"
+              aria-label="Private table room code"
+              autoComplete="off"
+              maxLength={12}
+              className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+            />
+            <input
+              value={playerName}
+              onChange={event => setPlayerName(event.target.value)}
+              placeholder="Your name (optional)"
+              aria-label="Name to show at the table"
+              maxLength={24}
+              className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={isJoiningRoom || Boolean(activeGame)}
+              className="rounded-lg border border-emerald-400/60 px-4 py-2 text-sm font-bold text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isJoiningRoom ? 'Joining…' : 'Join table'}
+            </button>
+          </div>
+          {roomMessage && <p role="status" className="mt-2 text-xs text-amber-300">{roomMessage}</p>}
+          {activeGame && <p className="mt-2 text-xs text-slate-500">Leave your current table before joining another.</p>}
+        </form>
         <button onClick={() => navigate('/hand-decider')} className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 text-left">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -109,8 +173,8 @@ export default function LobbyPage() {
         <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
           <h2 className="text-sm font-bold">Spectate a table</h2>
           <div className="mt-3 flex gap-2">
-            <input value={roomCode} onChange={event => setRoomCode(event.target.value)} placeholder="Room code" className="min-w-0 flex-1 rounded-lg border bg-slate-950 px-3 py-2 text-sm" />
-            <button onClick={() => roomCode.trim() && navigate(`/spectate/${roomCode.trim().toUpperCase()}`)} className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-bold text-amber-300">Watch</button>
+            <input value={spectateCode} onChange={event => setSpectateCode(event.target.value)} placeholder="Room code" className="min-w-0 flex-1 rounded-lg border bg-slate-950 px-3 py-2 text-sm" />
+            <button onClick={() => spectateCode.trim() && navigate(`/spectate/${spectateCode.trim().toUpperCase()}`)} className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-bold text-amber-300">Watch</button>
           </div>
           <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
             <h2 className="text-sm font-bold">Public rooms</h2>
