@@ -235,3 +235,61 @@ drop policy if exists "Users send friend requests" on public.friend_requests;
 create policy "Users send friend requests" on public.friend_requests for insert to authenticated with check (auth.uid() = sender_id);
 drop policy if exists "Receivers update friend requests" on public.friend_requests;
 create policy "Receivers update friend requests" on public.friend_requests for update to authenticated using (auth.uid() = receiver_id) with check (auth.uid() = receiver_id);
+
+create table if not exists public.room_invites (
+  id uuid primary key default gen_random_uuid(),
+  room_code text not null references public.rooms(room_code) on delete cascade,
+  inviter_id uuid not null references auth.users(id) on delete cascade,
+  invitee_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  unique (room_code, invitee_id),
+  check (inviter_id <> invitee_id)
+);
+
+alter table public.room_invites enable row level security;
+drop policy if exists "Invitees and room hosts can view room invites" on public.room_invites;
+create policy "Invitees and room hosts can view room invites"
+on public.room_invites for select to authenticated
+using (
+  auth.uid() = invitee_id
+  or exists (select 1 from public.rooms where rooms.room_code = room_invites.room_code and rooms.host_id = auth.uid())
+);
+drop policy if exists "Room hosts can invite accepted friends" on public.room_invites;
+create policy "Room hosts can invite accepted friends"
+on public.room_invites for insert to authenticated
+with check (
+  auth.uid() = inviter_id
+  and exists (select 1 from public.rooms where rooms.room_code = room_invites.room_code and rooms.host_id = auth.uid())
+  and exists (
+    select 1 from public.friend_requests
+    where status = 'accepted'
+      and (
+        (sender_id = auth.uid() and receiver_id = invitee_id)
+        or (receiver_id = auth.uid() and sender_id = invitee_id)
+      )
+  )
+);
+drop policy if exists "Room hosts can resend invitations" on public.room_invites;
+create policy "Room hosts can resend invitations"
+on public.room_invites for update to authenticated
+using (exists (select 1 from public.rooms where rooms.room_code = room_invites.room_code and rooms.host_id = auth.uid()))
+with check (exists (select 1 from public.rooms where rooms.room_code = room_invites.room_code and rooms.host_id = auth.uid()));
+drop policy if exists "Invitees can respond to room invites" on public.room_invites;
+create policy "Invitees can respond to room invites"
+on public.room_invites for update to authenticated
+using (auth.uid() = invitee_id)
+with check (auth.uid() = invitee_id);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'room_invites'
+  ) then
+    alter publication supabase_realtime add table public.room_invites;
+  end if;
+end
+$$;

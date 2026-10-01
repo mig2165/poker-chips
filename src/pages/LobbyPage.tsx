@@ -1,8 +1,8 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useGameStore } from '../store/useGameStore'
-import { listPublicRooms, requestRoomJoin, type PublicRoom } from '../lib/onlineRoom'
-import { hasSupabaseConfig } from '../lib/supabase'
+import { listPublicRooms, listRoomInvites, requestRoomJoin, respondToRoomInvite, subscribeToPublicRooms, subscribeToRoomInvites, type PublicRoom, type RoomInvite } from '../lib/onlineRoom'
+import { hasSupabaseConfig, supabase } from '../lib/supabase'
 
 export default function LobbyPage() {
   const navigate = useNavigate()
@@ -11,11 +11,49 @@ export default function LobbyPage() {
   const [playerName, setPlayerName] = useState('')
   const [isJoiningRoom, setIsJoiningRoom] = useState(false)
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([])
+  const [roomInvites, setRoomInvites] = useState<RoomInvite[]>([])
   const [roomMessage, setRoomMessage] = useState('')
+  const [inviteMessage, setInviteMessage] = useState('')
   const { game: activeGame, defaultConfig, joinOnlineRoom } = useGameStore()
 
   useEffect(() => {
-    void listPublicRooms().then(setPublicRooms).catch(() => setPublicRooms([]))
+    if (!hasSupabaseConfig()) return
+    let active = true
+    let roomChannel: ReturnType<typeof subscribeToPublicRooms> = null
+    let inviteChannel: ReturnType<typeof subscribeToRoomInvites> = null
+    const refreshRooms = () => {
+      void listPublicRooms().then(rooms => {
+        if (active) setPublicRooms(rooms)
+      }).catch(error => {
+        if (active) setRoomMessage(error instanceof Error ? error.message : 'Could not load public rooms.')
+      })
+    }
+    const refreshInvites = () => {
+      void listRoomInvites().then(invites => {
+        if (active) setRoomInvites(invites)
+      }).catch(error => {
+        if (active) setInviteMessage(error instanceof Error ? error.message : 'Could not load room invitations.')
+      })
+    }
+
+    refreshRooms()
+    refreshInvites()
+    roomChannel = subscribeToPublicRooms(refreshRooms)
+    void supabase?.auth.getUser().then(({ data }) => {
+      if (!active || !data.user || data.user.is_anonymous) return
+      inviteChannel = subscribeToRoomInvites(data.user.id, refreshInvites)
+    })
+    const refreshInterval = window.setInterval(() => {
+      refreshRooms()
+      refreshInvites()
+    }, 15000)
+
+    return () => {
+      active = false
+      window.clearInterval(refreshInterval)
+      if (roomChannel && supabase) void supabase.removeChannel(roomChannel)
+      if (inviteChannel && supabase) void supabase.removeChannel(inviteChannel)
+    }
   }, [])
 
   async function requestSeat(room: PublicRoom) {
@@ -58,6 +96,37 @@ export default function LobbyPage() {
       setRoomMessage(error instanceof Error ? error.message : 'Could not join this room.')
     } finally {
       setIsJoiningRoom(false)
+    }
+  }
+
+  async function acceptRoomInvite(invite: RoomInvite) {
+    if (activeGame) {
+      setInviteMessage('Leave your current table before joining another one.')
+      return
+    }
+    setIsJoiningRoom(true)
+    setInviteMessage('')
+    try {
+      await joinOnlineRoom(invite.roomCode, playerName.trim() || 'Guest', defaultConfig.buyIn)
+    } catch (error) {
+      setInviteMessage(error instanceof Error ? error.message : 'Could not join this invited room.')
+      setIsJoiningRoom(false)
+      return
+    }
+    try {
+      await respondToRoomInvite(invite.id, 'accepted')
+    } catch (error) {
+      window.alert(error instanceof Error ? `You joined the table, but the invitation could not be marked as accepted: ${error.message}` : 'You joined the table, but the invitation could not be marked as accepted.')
+    }
+    navigate('/table')
+  }
+
+  async function declineRoomInvite(invite: RoomInvite) {
+    try {
+      await respondToRoomInvite(invite.id, 'declined')
+      setRoomInvites(current => current.filter(item => item.id !== invite.id))
+    } catch (error) {
+      setInviteMessage(error instanceof Error ? error.message : 'Could not decline this invitation.')
     }
   }
 
@@ -130,6 +199,25 @@ export default function LobbyPage() {
           {roomMessage && <p role="status" className="mt-2 text-xs text-amber-300">{roomMessage}</p>}
           {activeGame && <p className="mt-2 text-xs text-slate-500">Leave your current table before joining another.</p>}
         </form>
+        {roomInvites.length > 0 && (
+          <section className="rounded-2xl border border-amber-400/40 bg-amber-950/20 p-5">
+            <h2 className="text-sm font-bold text-amber-200">Table invitations ({roomInvites.length})</h2>
+            <p className="mt-1 text-xs text-slate-400">Friends have invited you to join their table.</p>
+            {inviteMessage && <p role="status" className="mt-2 text-xs text-amber-300">{inviteMessage}</p>}
+            <div className="mt-3 space-y-2">
+              {roomInvites.map(invite => (
+                <div key={invite.id} className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-3">
+                  <div className="min-w-0 flex-1 text-xs">
+                    <strong>{invite.hostName} invited you</strong>
+                    <p className="mt-1 text-slate-400">{invite.isPublic ? 'Public' : 'Private'} room · code {invite.roomCode}</p>
+                  </div>
+                  <button disabled={isJoiningRoom || Boolean(activeGame)} onClick={() => void acceptRoomInvite(invite)} className="border border-emerald-400/60 px-2 py-1 text-xs font-bold text-emerald-300 disabled:opacity-50">Join</button>
+                  <button disabled={isJoiningRoom} onClick={() => void declineRoomInvite(invite)} className="border border-slate-600 px-2 py-1 text-xs font-bold text-slate-300 disabled:opacity-50">Dismiss</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         <button onClick={() => navigate('/hand-decider')} className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 text-left">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -178,8 +266,8 @@ export default function LobbyPage() {
           </div>
           <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
             <h2 className="text-sm font-bold">Public rooms</h2>
-            <p className="mt-1 text-xs text-slate-400">Request a seat in a room whose host has made it discoverable.</p>
-            {roomMessage && <p className="mt-2 text-xs text-emerald-300">{roomMessage}</p>}
+            <p className="mt-1 text-xs text-slate-400">Public rooms appear here; private rooms are available by invite or code. This list updates automatically.</p>
+            {roomMessage && <p role="status" className="mt-2 text-xs text-amber-300">{roomMessage}</p>}
             <div className="mt-3 space-y-2">
               {publicRooms.length === 0 && <p className="text-xs text-slate-500">No public rooms are waiting right now.</p>}
               {publicRooms.map(room => (

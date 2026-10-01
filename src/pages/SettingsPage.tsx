@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/useGameStore'
 import type { Player } from '../engine'
-import { createRoom } from '../lib/onlineRoom'
+import { createRoom, inviteFriendsToRoom } from '../lib/onlineRoom'
 import { hasSupabaseConfig, supabase } from '../lib/supabase'
 
 interface Friend {
@@ -130,6 +130,11 @@ export default function SettingsPage() {
         const createdGame = useGameStore.getState().game
         if (createdGame && finalRoomCode) {
           await createRoom(finalRoomCode, players[0].name, createdGame)
+          try {
+            await inviteFriendsToRoom(finalRoomCode, invitedFriends.map(friend => friend.id))
+          } catch (error) {
+            window.alert(error instanceof Error ? `Room created, but invites could not be sent: ${error.message}` : 'Room created, but invites could not be sent.')
+          }
         }
       } catch (error) {
         window.alert(error instanceof Error ? error.message : 'Could not create online room')
@@ -286,7 +291,7 @@ export default function SettingsPage() {
             <h2 className="text-xs font-semibold uppercase tracking-widest"
               style={{ color: 'var(--text-muted)' }}
             >
-              Players ({mode === 'bots' ? 3 : mode === 'online' ? 1 + invitedFriends.length : playerNames.length}/7)
+              Players ({mode === 'bots' ? 3 : mode === 'online' ? 1 : playerNames.length}/7)
             </h2>
             {mode !== 'bots' && mode !== 'online' && playerNames.length < 7 && (
               <button
@@ -300,7 +305,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
-            {(mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : mode === 'online' ? ['You', ...invitedFriends.map(friend => friend.username)] : playerNames).map((name, i) => (
+            {(mode === 'bots' ? ['You', 'Ruby Bot', 'Ace Bot'] : mode === 'online' ? ['You'] : playerNames).map((name, i) => (
               <div key={i} className="flex items-center gap-2">
                 <div className="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold"
                   style={{ background: 'var(--surface-tertiary)', color: 'var(--text-muted)' }}
@@ -322,11 +327,7 @@ export default function SettingsPage() {
                     '--tw-ring-color': 'var(--border-active)',
                   }}
                 />
-                {mode === 'online' && i > 0 ? (
-                  <button onClick={() => inviteFriend(invitedFriends[i - 1])} className="p-2 shrink-0 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors" aria-label={`Remove ${name}`}>
-                    ×
-                  </button>
-                ) : mode !== 'bots' && playerNames.length > 2 ? (
+                {mode !== 'bots' && mode !== 'online' && playerNames.length > 2 ? (
                   <button
                     onClick={() => handleRemovePlayer(i)}
                     className="p-2 shrink-0 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
@@ -341,8 +342,17 @@ export default function SettingsPage() {
             ))}
             {mode === 'online' && (
               <div className="border-t border-slate-700 pt-3">
-                <p className="text-xs text-slate-400">Invite an accepted friend</p>
+                <p className="text-xs text-slate-400">Invite accepted friends. They’ll get an invitation in their lobby.</p>
                 {friendMessage && <p className="mt-2 text-xs text-amber-300">{friendMessage}</p>}
+                {invitedFriends.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {invitedFriends.map(friend => (
+                      <button key={friend.id} onClick={() => inviteFriend(friend)} className="rounded-lg border border-amber-400/50 px-3 py-2 text-xs font-semibold text-amber-200" aria-label={`Remove ${friend.username} from invitations`}>
+                        {friend.username} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {friends.length === 0 && !friendMessage && <p className="mt-2 text-xs text-slate-500">No accepted friends available yet.</p>}
                 <div className="mt-2 flex flex-wrap gap-2">
                   {friends.filter(friend => !invitedFriends.some(invited => invited.id === friend.id)).map(friend => (

@@ -37,6 +37,95 @@ export interface PublicRoom {
   isPublic: boolean
 }
 
+export interface RoomInvite {
+  id: string
+  roomCode: string
+  hostName: string
+  isPublic: boolean
+  createdAt: string
+}
+
+export async function inviteFriendsToRoom(roomCode: string, friendIds: string[]): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  if (friendIds.length === 0) return
+  await ensureAnonymousSession()
+  const user = (await supabase.auth.getUser()).data.user
+  if (!user || user.is_anonymous) throw new Error('Sign in to invite friends to a room')
+
+  const { error } = await supabase.from('room_invites').upsert(
+    [...new Set(friendIds)]
+      .filter(friendId => friendId !== user.id)
+      .map(invitee_id => ({
+        room_code: roomCode,
+        inviter_id: user.id,
+        invitee_id,
+        status: 'pending',
+      })),
+    { onConflict: 'room_code,invitee_id' },
+  )
+  if (error) throw error
+}
+
+export async function listRoomInvites(): Promise<RoomInvite[]> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const user = (await supabase.auth.getUser()).data.user
+  if (!user || user.is_anonymous) return []
+  const { data: invites, error } = await supabase
+    .from('room_invites')
+    .select('id, room_code, created_at')
+    .eq('invitee_id', user.id)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  if (!invites?.length) return []
+
+  const roomCodes = [...new Set(invites.map(invite => invite.room_code))]
+  const { data: rooms, error: roomsError } = await supabase
+    .from('rooms')
+    .select('room_code, host_name, is_public')
+    .in('room_code', roomCodes)
+  if (roomsError) throw roomsError
+  return invites.flatMap(invite => {
+    const room = rooms?.find(item => item.room_code === invite.room_code)
+    return room ? [{
+      id: invite.id,
+      roomCode: invite.room_code,
+      hostName: room.host_name,
+      isPublic: room.is_public,
+      createdAt: invite.created_at,
+    }] : []
+  })
+}
+
+export async function respondToRoomInvite(id: string, status: 'accepted' | 'declined'): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from('room_invites').update({ status }).eq('id', id)
+  if (error) throw error
+}
+
+export function subscribeToRoomInvites(userId: string, onChange: () => void): RealtimeChannel | null {
+  if (!supabase) return null
+  return supabase.channel(`room-invites:${userId}`)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'room_invites',
+      filter: `invitee_id=eq.${userId}`,
+    }, onChange)
+    .subscribe()
+}
+
+export function subscribeToPublicRooms(onChange: () => void): RealtimeChannel | null {
+  if (!supabase) return null
+  return supabase.channel('public-room-list')
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'rooms',
+    }, onChange)
+    .subscribe()
+}
+
 export async function listPublicRooms(): Promise<PublicRoom[]> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { data, error } = await supabase.from('rooms').select('room_code, host_name, is_public, game_state').eq('is_public', true).order('updated_at', { ascending: false }).limit(20)
