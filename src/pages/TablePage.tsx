@@ -247,6 +247,12 @@ export default function TablePage() {
               ROOM {game.config.roomCode} · COPY INVITE
             </button>
           )}
+          <button
+            onClick={() => navigate('/cheatsheet?return=/table')}
+            className="mt-1 block text-[10px] font-bold uppercase tracking-widest text-amber-300 hover:text-amber-100"
+          >
+            Hand rankings
+          </button>
         </div>
         <div className="flex items-center gap-3">
           <button

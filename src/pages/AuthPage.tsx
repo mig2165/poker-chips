@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { signIn, signUp } from '../lib/supabase'
+import { resendSignupVerification, signIn, signUp } from '../lib/supabase'
 
 export default function AuthPage() {
   const navigate = useNavigate()
@@ -9,20 +9,44 @@ export default function AuthPage() {
   const [username, setUsername] = useState('')
   const [register, setRegister] = useState(false)
   const [message, setMessage] = useState('')
+  const [canResendVerification, setCanResendVerification] = useState(false)
+  const [isResendingVerification, setIsResendingVerification] = useState(false)
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     setMessage('')
+    setCanResendVerification(false)
     try {
       if (register) {
-        await signUp(email, password, username.trim())
-        setMessage('Account created. Check your email if confirmation is enabled.')
+        const result = await signUp(email, password, username.trim())
+        if (result.requiresEmailVerification) {
+          setMessage('To finish setting up your account, verify your email using the link we just sent you. Check your inbox and spam folder.')
+          setCanResendVerification(true)
+        } else {
+          setMessage('Your account is ready. You can sign in now.')
+        }
       } else {
         await signIn(email, password)
         navigate('/profile')
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Authentication failed')
+      const errorMessage = error instanceof Error ? error.message : 'Authentication failed'
+      setMessage(errorMessage)
+      if (errorMessage.toLowerCase().includes('verify')) {
+        setCanResendVerification(true)
+      }
+    }
+  }
+
+  async function resendVerification() {
+    setIsResendingVerification(true)
+    try {
+      await resendSignupVerification(email)
+      setMessage('A new verification email has been sent. Check your inbox and spam folder.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not resend the verification email.')
+    } finally {
+      setIsResendingVerification(false)
     }
   }
 
@@ -37,6 +61,15 @@ export default function AuthPage() {
         <button className="w-full rounded-lg bg-amber-400 px-4 py-3 font-bold text-slate-950">{register ? 'Create account' : 'Sign in'}</button>
       </form>
       {message && <p className="mt-4 text-sm text-amber-300">{message}</p>}
+      {canResendVerification && (
+        <button
+          onClick={() => void resendVerification()}
+          disabled={isResendingVerification || !email.trim()}
+          className="mt-3 text-sm font-semibold text-emerald-300 underline disabled:opacity-50"
+        >
+          {isResendingVerification ? 'Sending…' : 'Resend verification email'}
+        </button>
+      )}
       <button onClick={() => setRegister(value => !value)} className="mt-6 text-sm text-slate-400 underline">
         {register ? 'Already have an account? Sign in' : 'Need an account? Create one'}
       </button>

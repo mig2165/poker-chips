@@ -162,15 +162,51 @@ create policy "Users manage their own profile" on public.profiles for insert to 
 drop policy if exists "Users update their own profile" on public.profiles;
 create policy "Users update their own profile" on public.profiles for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 
+update public.profiles as profile
+set username = 'pending_' || replace(profile.id::text, '-', '')
+from auth.users as auth_user
+where auth_user.id = profile.id
+  and auth_user.email_confirmed_at is null
+  and profile.username not like 'pending_%';
+
+create or replace function public.is_username_taken_by_verified_user(candidate_username text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+  select exists (
+    select 1
+    from public.profiles as profile
+    join auth.users as auth_user on auth_user.id = profile.id
+    where lower(profile.username) = lower(candidate_username)
+      and auth_user.email_confirmed_at is not null
+  );
+$$;
+
+revoke all on function public.is_username_taken_by_verified_user(text) from public;
+grant execute on function public.is_username_taken_by_verified_user(text) to anon, authenticated;
+
 create or replace function public.create_profile_for_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  desired_username text;
 begin
+  if new.email_confirmed_at is null then
+    insert into public.profiles (id, username)
+    values (new.id, 'pending_' || replace(new.id::text, '-', ''))
+    on conflict (id) do nothing;
+    return new;
+  end if;
+
+  desired_username := coalesce(new.raw_user_meta_data->>'username', 'player_' || substr(new.id::text, 1, 8));
   insert into public.profiles (id, username)
-  values (new.id, coalesce(new.raw_user_meta_data->>'username', 'player_' || substr(new.id::text, 1, 8)))
-  on conflict (id) do nothing;
+  values (new.id, desired_username)
+  on conflict (id) do update set username = excluded.username;
   return new;
 end;
 $$;
@@ -218,6 +254,13 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.create_profile_for_user();
+
+drop trigger if exists on_auth_user_email_confirmed on auth.users;
+create trigger on_auth_user_email_confirmed
+  after update of email_confirmed_at on auth.users
+  for each row
+  when (new.email_confirmed_at is not null and old.email_confirmed_at is distinct from new.email_confirmed_at)
+  execute procedure public.create_profile_for_user();
 
 create table if not exists public.friend_requests (
   id uuid primary key default gen_random_uuid(),

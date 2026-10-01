@@ -167,6 +167,22 @@ export default function LobbyPage() {
             Track a real home game, play a guided bot table, or run the rules yourself with physical cards.
           </p>
         </div>
+        <button
+          onClick={() => navigate('/cheatsheet')}
+          className="rounded-2xl border border-amber-400/30 bg-amber-950/20 p-5 text-left transition-colors hover:border-amber-300/70"
+        >
+          <div className="flex items-center gap-4">
+            <div className="flex -space-x-3" aria-hidden="true">
+              <span className="flex h-10 w-8 rotate-[-8deg] items-center justify-center rounded-md border border-slate-300 bg-white text-lg font-extrabold text-slate-900">A♠</span>
+              <span className="flex h-10 w-8 rotate-[6deg] items-center justify-center rounded-md border border-slate-300 bg-white text-lg font-extrabold text-rose-600">K♥</span>
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-amber-100">Poker hand cheat sheet</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-400">See every hand from strongest to weakest, with card examples.</p>
+            </div>
+            <span className="ml-auto text-amber-300" aria-hidden="true">→</span>
+          </div>
+        </button>
         <form onSubmit={event => void handleJoinRoom(event)} className="rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
           <h2 className="text-sm font-bold">Join a private table</h2>
           <p className="mt-1 text-xs leading-5 text-slate-400">Enter the room code your friend shared. You can join with a code even if the room is not public.</p>

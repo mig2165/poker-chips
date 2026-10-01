@@ -22,20 +22,20 @@ export async function ensureAnonymousSession(): Promise<void> {
 export async function signIn(email: string, password: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error?.code === 'email_not_confirmed' || error?.message.toLowerCase().includes('email not confirmed')) {
+    throw new Error('Please verify your email using the link we sent you before signing in.')
+  }
   if (error) throw error
 }
 
-export async function signUp(email: string, password: string, username: string): Promise<void> {
+export async function signUp(email: string, password: string, username: string): Promise<{ requiresEmailVerification: boolean }> {
   if (!supabase) throw new Error('Supabase is not configured')
   const normalizedUsername = username.trim()
-  const escapedUsername = normalizedUsername.replace(/([\\%_])/g, '\\$1')
-  const { data: existingProfile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id')
-    .ilike('username', escapedUsername)
-    .maybeSingle()
-  if (profileError) throw profileError
-  if (existingProfile) throw new Error('That username is already taken. Choose another one.')
+  const { data: usernameTaken, error: usernameError } = await supabase.rpc('is_username_taken_by_verified_user', {
+    candidate_username: normalizedUsername,
+  })
+  if (usernameError) throw usernameError
+  if (usernameTaken) throw new Error('That username is already taken by a verified account. Choose another one.')
 
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -47,8 +47,15 @@ export async function signUp(email: string, password: string, username: string):
   })
   if (error) throw error
   if (data.user?.identities?.length === 0) {
-    throw new Error('An account with that email already exists. Sign in instead.')
+    throw new Error('An account with that email already exists. Sign in, and if it is not verified yet, resend the verification email.')
   }
+  return { requiresEmailVerification: !data.session }
+}
+
+export async function resendSignupVerification(email: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim() })
+  if (error) throw error
 }
 
 export async function signOut(): Promise<void> {
