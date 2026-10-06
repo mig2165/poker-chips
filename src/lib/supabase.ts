@@ -11,6 +11,16 @@ export function hasSupabaseConfig(): boolean {
   return Boolean(supabase)
 }
 
+function authenticationErrorMessage(error: { code?: string; message: string }): string {
+  if (error.code === 'email_not_confirmed' || error.message.toLowerCase().includes('email not confirmed')) {
+    return 'Please verify your email using the link we sent you before signing in.'
+  }
+  if (error.code?.includes('rate_limit') || error.message.toLowerCase().includes('rate limit')) {
+    return 'Supabase has temporarily limited email sending for this project. Wait before trying again. For reliable sign-ups as more people join, configure a custom SMTP email provider in Supabase Auth settings.'
+  }
+  return error.message
+}
+
 export async function ensureAnonymousSession(): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { data } = await supabase.auth.getSession()
@@ -22,10 +32,7 @@ export async function ensureAnonymousSession(): Promise<void> {
 export async function signIn(email: string, password: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error?.code === 'email_not_confirmed' || error?.message.toLowerCase().includes('email not confirmed')) {
-    throw new Error('Please verify your email using the link we sent you before signing in.')
-  }
-  if (error) throw error
+  if (error) throw new Error(authenticationErrorMessage(error))
 }
 
 export async function signUp(email: string, password: string, username: string): Promise<{ requiresEmailVerification: boolean }> {
@@ -45,7 +52,7 @@ export async function signUp(email: string, password: string, username: string):
       emailRedirectTo: window.location.origin,
     },
   })
-  if (error) throw error
+  if (error) throw new Error(authenticationErrorMessage(error))
   if (data.user?.identities?.length === 0) {
     throw new Error('An account with that email already exists. Sign in, and if it is not verified yet, resend the verification email.')
   }
@@ -55,7 +62,7 @@ export async function signUp(email: string, password: string, username: string):
 export async function resendSignupVerification(email: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim() })
-  if (error) throw error
+  if (error) throw new Error(authenticationErrorMessage(error))
 }
 
 export async function signOut(): Promise<void> {

@@ -92,6 +92,7 @@ on public.room_messages for select to authenticated using (true);
 drop policy if exists "Signed-in users can send chat" on public.room_messages;
 create policy "Signed-in users can send chat"
 on public.room_messages for insert to authenticated with check (auth.uid() = sender_id);
+grant select, insert on public.room_messages to authenticated;
 do $$
 begin
   if not exists (

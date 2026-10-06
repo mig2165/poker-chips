@@ -182,8 +182,23 @@ export async function sendRoomChat(roomCode: string, senderName: string, message
   if (!supabase) throw new Error('Supabase is not configured')
   await ensureAnonymousSession()
   const user = (await supabase.auth.getUser()).data.user
-  const { error } = await supabase.from('room_messages').insert({ room_code: roomCode, sender_id: user?.id, sender_name: senderName, message: message.trim() })
-  if (error) throw error
+  if (!user) throw new Error('Your online session could not be confirmed. Reload the page and try again.')
+  const { error } = await supabase.from('room_messages').insert({ room_code: roomCode, sender_id: user.id, sender_name: senderName, message: message.trim() })
+  if (error) throw new Error(formatRoomChatError(error))
+}
+
+function formatRoomChatError(error: { code?: string; message: string }): string {
+  const message = error.message.toLowerCase()
+  if (error.code === 'PGRST205' || error.code === '42P01' || (message.includes('room_messages') && message.includes('schema cache'))) {
+    return 'Room chat is not set up in Supabase yet. Ask the site owner to run the latest supabase/schema.sql.'
+  }
+  if (error.code === '42501' || message.includes('row-level security') || message.includes('permission denied')) {
+    return 'Supabase blocked this chat message. Check that the latest room_messages access policies are installed.'
+  }
+  if (error.code === '401' || error.code === '403' || message.includes('jwt')) {
+    return 'Your online session expired. Reload the page and try sending the message again.'
+  }
+  return `Could not send chat message: ${error.message}`
 }
 
 export function subscribeToRoomChat(roomCode: string, onMessage: (message: { senderName: string; message: string }) => void): RealtimeChannel | null {

@@ -11,9 +11,12 @@ export default function AuthPage() {
   const [message, setMessage] = useState('')
   const [canResendVerification, setCanResendVerification] = useState(false)
   const [isResendingVerification, setIsResendingVerification] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (isSubmitting) return
+    setIsSubmitting(true)
     setMessage('')
     setCanResendVerification(false)
     try {
@@ -35,10 +38,13 @@ export default function AuthPage() {
       if (errorMessage.toLowerCase().includes('verify')) {
         setCanResendVerification(true)
       }
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
   async function resendVerification() {
+    if (isResendingVerification || !email.trim()) return
     setIsResendingVerification(true)
     try {
       await resendSignupVerification(email)
@@ -58,7 +64,9 @@ export default function AuthPage() {
         {register && <input required minLength={3} value={username} onChange={event => setUsername(event.target.value)} placeholder="Username" className="w-full rounded-lg border bg-slate-900 px-4 py-3" />}
         <input required type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="Email" className="w-full rounded-lg border bg-slate-900 px-4 py-3" />
         <input required minLength={6} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Password" className="w-full rounded-lg border bg-slate-900 px-4 py-3" />
-        <button className="w-full rounded-lg bg-amber-400 px-4 py-3 font-bold text-slate-950">{register ? 'Create account' : 'Sign in'}</button>
+        <button disabled={isSubmitting} className="w-full rounded-lg bg-amber-400 px-4 py-3 font-bold text-slate-950 disabled:cursor-wait">
+          {isSubmitting ? 'Please wait…' : register ? 'Create account' : 'Sign in'}
+        </button>
       </form>
       {message && <p className="mt-4 text-sm text-amber-300">{message}</p>}
       {canResendVerification && (

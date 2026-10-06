@@ -39,6 +39,8 @@ export default function TablePage() {
   const [isSelectingWinner, setIsSelectingWinner] = useState(false)
   const [showOwnCards, setShowOwnCards] = useState(false)
   const [chatMessage, setChatMessage] = useState('')
+  const [chatStatus, setChatStatus] = useState('')
+  const [isSendingChat, setIsSendingChat] = useState(false)
   const [chat, setChat] = useState<Array<{ senderName: string; message: string }>>([])
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; requesterName: string }>>([])
 
@@ -210,13 +212,18 @@ export default function TablePage() {
   async function submitChat(event: FormEvent) {
     event.preventDefault()
     const currentGame = useGameStore.getState().game
-    if (!currentGame?.config.roomCode || !chatMessage.trim()) return
+    if (!currentGame?.config.roomCode || !chatMessage.trim() || isSendingChat) return
     const sender = currentGame.players.find(player => player.isLocal)?.name ?? 'Player'
+    setIsSendingChat(true)
+    setChatStatus('')
     try {
       await sendRoomChat(currentGame.config.roomCode, sender, chatMessage)
       setChatMessage('')
+      setChatStatus('Message sent.')
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Could not send chat message')
+      setChatStatus(error instanceof Error ? error.message : 'Could not send chat message. Please try again.')
+    } finally {
+      setIsSendingChat(false)
     }
   }
 
@@ -477,7 +484,10 @@ export default function TablePage() {
                   <div className="text-[11px] font-mono font-medium" style={{ color: 'var(--text-accent)' }}>
                     ${player.stack}
                   </div>
-                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && ((!player.isLocal && (game.config.mode !== 'online' || !player.isActive || hand.isComplete)) || (player.isLocal && (showOwnCards || hand.isComplete))) && (
+                  {hand && player.holeCards.length > 0 && game.config.mode !== 'chipless' && (
+                    (player.isLocal && (showOwnCards || hand.isComplete))
+                    || (!player.isLocal && hand.isComplete)
+                  ) && (
                     <div className="flex gap-1 justify-center mt-1">
                       {player.holeCards.map(card => {
                         const symbol = { S: '♠', H: '♥', D: '♦', C: '♣' }[card.suit]
@@ -514,9 +524,10 @@ export default function TablePage() {
             {chat.length === 0 && <p className="text-slate-500">Room chat is ready.</p>}
             {chat.map((item, index) => <p key={`${item.senderName}-${index}`}><strong className="text-amber-300">{item.senderName}:</strong> <span className="text-slate-300">{item.message}</span></p>)}
           </div>
+          {chatStatus && <p role="status" className={`mb-2 text-xs ${chatStatus === 'Message sent.' ? 'text-emerald-300' : 'text-amber-300'}`}>{chatStatus}</p>}
           <form onSubmit={submitChat} className="flex gap-2">
             <input value={chatMessage} onChange={event => setChatMessage(event.target.value)} maxLength={300} placeholder="Message the table" className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs" />
-            <button className="border border-amber-400 px-3 py-2 text-xs font-bold text-amber-300">Send</button>
+            <button disabled={isSendingChat || !chatMessage.trim()} className="border border-amber-400 px-3 py-2 text-xs font-bold text-amber-300 disabled:opacity-50">{isSendingChat ? 'Sending…' : 'Send'}</button>
           </form>
         </section>
       )}
