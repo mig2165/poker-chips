@@ -128,9 +128,17 @@ export function subscribeToPublicRooms(onChange: () => void): RealtimeChannel | 
 
 export async function listPublicRooms(): Promise<PublicRoom[]> {
   if (!supabase) throw new Error('Supabase is not configured')
-  const { data, error } = await supabase.from('rooms').select('room_code, host_name, is_public, game_state').eq('is_public', true).order('updated_at', { ascending: false }).limit(20)
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError) throw authError
+  const currentUserId = authData.user?.id
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('room_code, host_name, host_id, is_public, game_state')
+    .eq('is_public', true)
+    .order('updated_at', { ascending: false })
+    .limit(20)
   if (error) throw error
-  return (data ?? []).map(room => {
+  return (data ?? []).filter(room => !currentUserId || room.host_id !== currentUserId).map(room => {
     const game = room.game_state as GameState
     return {
       roomCode: room.room_code,
