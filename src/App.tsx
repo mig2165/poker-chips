@@ -11,6 +11,8 @@ import FriendsPage from './pages/FriendsPage'
 import HandDeciderPage from './pages/HandDeciderPage'
 import HandCheatsheetPage from './pages/HandCheatsheetPage'
 import ProfilePage from './pages/ProfilePage'
+import ReportPage from './pages/ReportPage'
+import AdminReportsPage from './pages/AdminReportsPage'
 
 export default function App() {
   return (
@@ -27,6 +29,8 @@ export default function App() {
         <Route path="/hand-decider" element={<HandDeciderPage />} />
         <Route path="/cheatsheet" element={<HandCheatsheetPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/report" element={<ReportPage />} />
+        <Route path="/admin/reports" element={<AdminReportsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

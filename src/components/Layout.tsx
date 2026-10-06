@@ -2,6 +2,7 @@ import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { signOut, supabase } from '../lib/supabase'
+import { countNewAppReports, isCurrentUserReportAdmin } from '../lib/reporting'
 
 const navItems = [
   {
@@ -44,6 +45,8 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [username, setUsername] = useState<string | null>(null)
+  const [isReportAdmin, setIsReportAdmin] = useState(false)
+  const [newReportCount, setNewReportCount] = useState(0)
 
   useEffect(() => {
     const client = supabase
@@ -54,20 +57,48 @@ export default function Layout() {
     const loadUser = async (user: User | null) => {
       const currentRequestId = ++requestId
       if (!user || user.is_anonymous) {
-        if (mounted && currentRequestId === requestId) setUsername(null)
+        if (mounted && currentRequestId === requestId) {
+          setUsername(null)
+          setIsReportAdmin(false)
+          setNewReportCount(0)
+        }
         return
       }
-      const { data: profile } = await client.from('profiles').select('username').eq('id', user.id).maybeSingle()
+      const [{ data: profile }, isAdmin] = await Promise.all([
+        client.from('profiles').select('username').eq('id', user.id).maybeSingle(),
+        isCurrentUserReportAdmin(),
+      ])
       if (!mounted || currentRequestId !== requestId) return
       setUsername(profile?.username ?? String(user.user_metadata?.username ?? user.email?.split('@')[0] ?? 'Player'))
+      setIsReportAdmin(isAdmin)
+      if (isAdmin) {
+        try {
+          setNewReportCount(await countNewAppReports())
+        } catch (error) {
+          console.error('Could not count new player reports', error)
+        }
+      } else {
+        setNewReportCount(0)
+      }
     }
 
     void client.auth.getSession().then(({ data }) => loadUser(data.session?.user ?? null))
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       void loadUser(session?.user ?? null)
     })
+    const reportCountRefresh = window.setInterval(() => {
+      if (mounted) {
+        void isCurrentUserReportAdmin()
+          .then(isAdmin => isAdmin ? countNewAppReports() : 0)
+          .then(count => {
+            if (mounted) setNewReportCount(count)
+          })
+          .catch(error => console.error('Could not refresh new report count', error))
+      }
+    }, 60000)
     return () => {
       mounted = false
+      window.clearInterval(reportCountRefresh)
       listener.subscription.unsubscribe()
     }
   }, [])
@@ -80,14 +111,18 @@ export default function Layout() {
 
   return (
     <div className="flex flex-col min-h-dvh">
-      <header className="flex items-center justify-end px-5 pt-4">
+      <header className="flex items-center justify-between gap-3 px-5 pt-4">
+        <div className="flex items-center gap-3 text-xs sm:text-sm">
+          <NavLink to="/report" state={{ from: location.pathname }} className="font-semibold text-amber-300 underline">Report a problem</NavLink>
+          {isReportAdmin && <NavLink to="/admin/reports" className="font-semibold text-emerald-300 underline">Reports{newReportCount > 0 ? ` (${newReportCount} new)` : ''}</NavLink>}
+        </div>
         {username ? (
           <div className="flex items-center gap-3 text-sm">
             <NavLink to="/profile" className="font-semibold text-slate-200 hover:text-amber-300">{username}</NavLink>
             <button onClick={() => void handleSignOut()} className="text-slate-400 underline hover:text-slate-200">Log out</button>
           </div>
         ) : (
-          <NavLink to="/auth" className="text-sm font-semibold text-amber-300 underline">Sign in</NavLink>
+          <NavLink to="/auth" className="shrink-0 text-sm font-semibold text-amber-300 underline">Sign in</NavLink>
         )}
       </header>
 

@@ -337,3 +337,91 @@ begin
   end if;
 end
 $$;
+
+create table if not exists public.app_report_admins (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+alter table public.app_report_admins enable row level security;
+drop policy if exists "Admins can check their own report access" on public.app_report_admins;
+create policy "Admins can check their own report access"
+on public.app_report_admins for select to authenticated
+using (auth.uid() = user_id);
+grant select on public.app_report_admins to authenticated;
+
+create table if not exists public.app_reports (
+  id uuid primary key default gen_random_uuid(),
+  submitted_by uuid default auth.uid() references auth.users(id) on delete set null,
+  category text not null check (category in (
+    'Something went wrong',
+    'Login or account',
+    'Online room or invitations',
+    'Chat or messages',
+    'Cards or poker rules',
+    'Other'
+  )),
+  description text not null check (char_length(description) between 8 and 3000),
+  page_path text not null default '/',
+  screenshot_paths text[] not null default '{}',
+  status text not null default 'new' check (status in ('new', 'reviewing', 'resolved')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.app_reports enable row level security;
+drop policy if exists "Signed-in users can submit reports" on public.app_reports;
+create policy "Signed-in users can submit reports"
+on public.app_reports for insert to authenticated
+with check (auth.uid() = submitted_by);
+drop policy if exists "Admins can read reports" on public.app_reports;
+create policy "Admins can read reports"
+on public.app_reports for select to authenticated
+using (exists (select 1 from public.app_report_admins where user_id = auth.uid()));
+drop policy if exists "Admins can update report status" on public.app_reports;
+create policy "Admins can update report status"
+on public.app_reports for update to authenticated
+using (exists (select 1 from public.app_report_admins where user_id = auth.uid()))
+with check (exists (select 1 from public.app_report_admins where user_id = auth.uid()));
+grant insert, select, update on public.app_reports to authenticated;
+revoke update on public.app_reports from authenticated;
+grant update (status) on public.app_reports to authenticated;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'app-report-screenshots',
+  'app-report-screenshots',
+  false,
+  5242880,
+  array['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic']
+)
+on conflict (id) do update
+set public = false,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Users can upload their report screenshots" on storage.objects;
+create policy "Users can upload their report screenshots"
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'app-report-screenshots'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+drop policy if exists "Admins can read report screenshots" on storage.objects;
+create policy "Admins can read report screenshots"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'app-report-screenshots'
+  and exists (select 1 from public.app_report_admins where user_id = auth.uid())
+);
+drop policy if exists "Users can remove their report screenshots" on storage.objects;
+create policy "Users can remove their report screenshots"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'app-report-screenshots'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- After creating your account and signing in, grant the site owner report access with:
+-- insert into public.app_report_admins (user_id)
+-- select id from auth.users where lower(email) = lower('YOUR_SIGN_IN_EMAIL')
+-- on conflict (user_id) do nothing;
